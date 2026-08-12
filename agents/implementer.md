@@ -1,7 +1,7 @@
 ---
 name: implementer
 description: TDD stage 2; implements against red tests and owns review fixes
-model: openai-codex/gpt-5.6-terra
+model: openai-codex/gpt-5.6-luna
 thinking: medium
 tools: read, grep, find, ls, bash, edit, write
 ---

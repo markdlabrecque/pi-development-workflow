@@ -1,7 +1,7 @@
 ---
 name: test-writer
 description: TDD stage 1; writes and proves initial red tests from the approved spec
-model: openai-codex/gpt-5.6-terra
+model: openai-codex/gpt-5.6-luna
 thinking: low
 tools: read, grep, find, ls, bash, edit, write
 ---

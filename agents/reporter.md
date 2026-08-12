@@ -1,7 +1,7 @@
 ---
 name: reporter
 description: TDD stage 4; returns the exact auditable final system-of-record post
-model: openai-codex/gpt-5.6-terra
+model: openai-codex/gpt-5.6-luna
 thinking: low
 tools: read, grep, find, ls, bash
 ---
