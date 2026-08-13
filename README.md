@@ -98,6 +98,7 @@ Commands:
 /workflow-disable
 /workflow-status [workflow-id]
 /workflow-diagnostics [workflow-id]
+/workflow-recover [workflow-id]
 /workflow-abort [workflow-id]
 ```
 
@@ -107,7 +108,7 @@ Children are bound to raw `PI_WORKFLOW_ID` and `PI_WORKFLOW_ROLE`. Child prompts
 
 State is stored under `~/.pi/agent/runtime/development-workflow/`. Versions 1–4 migrate lazily to schema version 5 without reinterpreting their active stage or old sequence. In particular, active legacy `planning`, `implementing`, or post-implementation `testing` workflows continue their recovery path; only newly created workflows use red-first stages.
 
-Use workflow `status` and subagent `{ "action": "list", "workflowId": "..." }` to recover stable handles. Parent cancellation stops running children but leaves state resumable. Blocked, aborted, disputed-test, posting-failed, and review-escalated workflows retain state and diagnostics. `close` removes only a terminal workflow after coordinated subagent cleanup. Successful completion auto-closes after the foreground result is visible. Orphaned `.pi/workplans/` are recovery artifacts: inspect their workflow ID and durable state before deleting them.
+Use workflow `status` and subagent `{ "action": "list", "workflowId": "..." }` to recover stable handles. When startup, reload, or session replacement finds an unfinished workflow, the extension prompts to continue from its exact persisted stage or clear its workflow-scoped child sessions and durable state so it can start again. `/workflow-recover [workflow-id]` reopens that exit hatch on demand. Parent cancellation stops running children but leaves state resumable. Blocked, aborted, disputed-test, posting-failed, and review-escalated workflows retain state and diagnostics. `close` removes only a terminal workflow after coordinated subagent cleanup. Successful completion auto-closes after the foreground result is visible. Orphaned `.pi/workplans/` are recovery artifacts: inspect their workflow ID and durable state before deleting them.
 
 Diagnostics are append-only, bounded, and redacted under `~/.pi/agent/runtime/development-workflow/diagnostics/`; successful cleanup compacts them to a summary and failed diagnostics retain the 24-hour policy.
 

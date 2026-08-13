@@ -67,7 +67,9 @@ function createMockPi() {
   const statuses = new Map();
   const subagentRequests = [];
   let confirmAnswer = true;
+  let selectAnswer;
   const confirmations = [];
+  const selections = [];
   const pi = {
     events: {
       emit(name, request) {
@@ -125,10 +127,11 @@ function createMockPi() {
       setStatus(key, value) { statuses.set(key, value); },
       notify(message, level) { notifications.push({ message, level }); },
       async confirm(title, message) { confirmations.push({ title, message }); return confirmAnswer; },
+      async select(title, options) { selections.push({ title, options }); return selectAnswer ?? options[0]; },
     },
   };
   developmentWorkflow(pi);
-  return { pi, handlers, commands, tools, active, notifications, statuses, confirmations, subagentRequests, setConfirmAnswer(value) { confirmAnswer = value; }, ctx };
+  return { pi, handlers, commands, tools, active, notifications, statuses, confirmations, selections, subagentRequests, setConfirmAnswer(value) { confirmAnswer = value; }, setSelectAnswer(value) { selectAnswer = value; }, ctx };
 }
 
 async function emit(mock, name, event, ctx = mock.ctx) {
@@ -142,6 +145,36 @@ async function emit(mock, name, event, ctx = mock.ctx) {
 async function startWithWorkflow(mock) {
   await emit(mock, "session_start", { reason: "startup" });
 }
+
+test("unfinished workflow recovery prompts to continue or clear and restart", async () => {
+  const workdir = await mkdtemp(path.join(os.tmpdir(), "workflow-recovery-prompt-"));
+  const workflowId = `recovery-prompt-${Date.now()}`;
+  resetWorkflowMode();
+  const mock = createMockPi();
+  mock.ctx.cwd = workdir;
+  try {
+    await workflowStateModule.saveState(workflowStateModule.createState({ id: workflowId, goal: "recover interrupted dispatch", repositoryRoot: workdir }));
+    await emit(mock, "session_start", { reason: "reload" });
+
+    assert.equal(mock.selections.length, 1);
+    assert.equal(mock.selections[0].title, "Unfinished development workflow");
+    assert.deepEqual(mock.selections[0].options, [
+      `Continue ${workflowId} from red_testing`,
+      `Clear ${workflowId} and start again`,
+    ]);
+    assert.ok(await workflowStateModule.loadState(workflowId), "continue preserves durable state");
+    assert.ok(mock.notifications.some(item => item.message === `Continuing workflow ${workflowId} from red_testing.`));
+
+    mock.setSelectAnswer(`Clear ${workflowId} and start again`);
+    await mock.commands.get("workflow-recover").handler(workflowId, mock.ctx);
+    assert.equal(await workflowStateModule.loadState(workflowId), undefined, "clear removes durable state so the ID can be reused");
+    assert.equal(mock.subagentRequests.at(-1)?.action, "closeWorkflow", "clear closes workflow-scoped child sessions first");
+    assert.ok(mock.notifications.some(item => item.message.includes("Submit the development workflow request again to restart.")));
+  } finally {
+    await workflowStateModule.removeState(workflowId).catch(() => undefined);
+    await rm(workdir, { recursive: true, force: true });
+  }
+});
 
 test("status uses cloned cached reads, suppresses repeated state loads, and reloads at lifecycle boundaries", async () => {
   const workdir = await mkdtemp(path.join(os.tmpdir(), "workflow-cache-status-"));

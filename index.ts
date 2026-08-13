@@ -7,7 +7,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { compact, CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { adoptExistingState, applyPolicyDecision, createState, isWorkflowExpired, listStates, loadState, NO_STATE_WRITE, recordReviewCapEscalation, replaceRoleAttempt, resolveReviewCap, retireState, saveState, satisfyOutcome, transactState, transition, workflowExpirationTime, type FindingCategory, type ReviewCapResolution, type ReviewFinding, type RoleAttemptReplacement, type Stage, type WorkflowState } from "./workflow-state.ts";
+import { adoptExistingState, applyPolicyDecision, createState, isWorkflowExpired, listStates, loadState, NO_STATE_WRITE, recordReviewCapEscalation, removeState, replaceRoleAttempt, resolveReviewCap, retireState, saveState, satisfyOutcome, transactState, transition, workflowExpirationTime, type FindingCategory, type ReviewCapResolution, type ReviewFinding, type RoleAttemptReplacement, type Stage, type WorkflowState } from "./workflow-state.ts";
 import { mergeWorkflowSnapshot, renderWorkflowSnapshot } from "./compaction-state.ts";
 import { resolveSystemOfRecord, updateSystemOfRecord } from "./system-of-record.ts";
 import { parseReviewerOutput } from "./reviewer.ts";
@@ -360,6 +360,38 @@ export default function (pi: ExtensionAPI) {
   const stateCache = new WorkflowStateCache<WorkflowState>();
   const cachedState = (id: string) => stateCache.get(id, loadState);
   const cachedStates = () => stateCache.list(listStates);
+  const clearInterruptedWorkflow = async (state: WorkflowState): Promise<void> => {
+    // Stop and forget workflow-scoped children before making this ID reusable. Unlike
+    // terminal close, recovery reset deliberately does not tombstone the workflow ID.
+    await requestSubagentClose(pi, state.id);
+    await removeState(state.id);
+    stateCache.delete(state.id);
+    if (currentId === state.id) currentId = undefined;
+    diagnose(state.id, "workflow_reset", { stage: state.stage, outcome: "success" });
+  };
+  const promptInterruptedWorkflow = async (state: WorkflowState, ctx: ExtensionContext): Promise<void> => {
+    if (!ctx.hasUI || typeof ctx.ui.select !== "function") return;
+    const continueChoice = `Continue ${state.id} from ${state.stage}`;
+    const clearChoice = `Clear ${state.id} and start again`;
+    const choice = await ctx.ui.select(
+      "Unfinished development workflow",
+      [continueChoice, clearChoice],
+    );
+    if (choice === continueChoice) {
+      currentId = state.id;
+      ctx.ui.notify(`Continuing workflow ${state.id} from ${state.stage}.`, "info");
+      return;
+    }
+    if (choice === clearChoice) {
+      try {
+        await clearInterruptedWorkflow(state);
+        ctx.ui.notify(`Cleared workflow ${state.id}. Submit the development workflow request again to restart.`, "warning");
+      } catch (error: any) {
+        currentId = state.id;
+        ctx.ui.notify(`Unable to clear workflow ${state.id}; its recovery state was retained: ${error.message}`, "error");
+      }
+    }
+  };
   const persist = async (state: WorkflowState): Promise<void> => {
     await saveState(state); currentId = state.id;
     stateCache.set(state);
@@ -398,6 +430,10 @@ export default function (pi: ExtensionAPI) {
     uiCtx = ctx; const states = await cachedStates(); refreshStaleWorkflowWarnings(states, ctx); const active = states.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).find(s => !["completed", "aborted"].includes(s.stage)); currentId = active?.id;
     void pruneExpiredDiagnostics().catch(() => undefined);
     if (currentId) diagnose(currentId, "session_start", { metadata: { reason: _event.reason } });
+    // Reload, resume, and process restart can strand a durable workflow between role
+    // stages. Never silently discard it or blindly restart from red_testing: ask the
+    // user whether to resume the exact persisted stage or clear all workflow sessions.
+    if (active) await promptInterruptedWorkflow(active, ctx);
   });
   pi.on("session_shutdown", event => {
     if (currentId) diagnose(currentId, "session_shutdown", { metadata: { reason: event.reason } });
@@ -911,6 +947,15 @@ export default function (pi: ExtensionAPI) {
     if (!id) { if (ctx.hasUI) ctx.ui.notify("No active workflow", "warning"); return; }
     try { if (ctx.hasUI) ctx.ui.notify(renderDiagnosticSummary(await summarizeDiagnostics(id)), "info"); }
     catch (error: any) { if (ctx.hasUI) ctx.ui.notify(`Unable to read workflow diagnostics: ${error.message}`, "error"); }
+  } });
+  pi.registerCommand("workflow-recover", { description: "continue or clear an unfinished development workflow", handler: async (args, ctx) => {
+    const id = args.trim() || currentId;
+    if (!id) { if (ctx.hasUI) ctx.ui.notify("No unfinished workflow", "warning"); return; }
+    try {
+      const state = await loadState(id);
+      if (!state || ["completed", "aborted"].includes(state.stage)) { if (ctx.hasUI) ctx.ui.notify(`No unfinished workflow ${id}`, "warning"); return; }
+      await promptInterruptedWorkflow(state, ctx);
+    } catch (error: any) { if (ctx.hasUI) ctx.ui.notify(`Unable to recover workflow ${id}: ${error.message}`, "error"); }
   } });
   for (const [name, action] of [["workflow-status", "status"], ["workflow-abort", "abort"]] as const) pi.registerCommand(name, { description: `${action} development workflow`, handler: async (args, ctx) => {
     const id = args.trim() || currentId;
