@@ -39,6 +39,12 @@ The role prompts are not the only guard. State transitions enforce:
 
 Fresh physical attempts receive one compact artifact bundle, not conversation history: approved-plan reference, acceptance criteria, relevant red/green evidence, implementation diff, review findings, deviations, unresolved risks, and follow-ups. Logical role authority and claims are stable; infrastructure attempts are replaceable without changing authority. The workflow dispatch cap rejects oversized handoffs; do not duplicate full plans, repeat broad rediscovery, or whole-file rereads.
 
+### Profiles versus workflow roles
+
+Agent profile names and workflow role identifiers are separate namespaces. A dispatch with `lifecycle: "workflow"` accepts only these exact `agentId` values: `planner`, `implementer`, `test-writer`, `reviewer`, and `reporter`. The extension does not normalize spelling variants such as `test_writer` or infer semantic aliases such as `auditor -> reviewer`; invented identifiers are rejected with the valid list.
+
+Auxiliary profiles remain available outside workflow lifecycle. For example, use `{ "agent": "researcher", "task": "Investigate ..." }` without `lifecycle`, `workflowId`, or `agentId`. Do not represent a researcher or auditor profile as an invented privileged workflow role.
+
 ## Atomic review routing and recoverable cap
 
 `routeReview` atomically records independent gate evidence, findings, evidence IDs, and an idempotency key. Exact retries are no-ops; conflicting reuse is rejected. Two review rounds are the default cap, not an automatic dead-end: it persists a recoverable escalation in reviewing with foreground choices `narrow_fix`, `convert_noncritical_follow_up`, `additional_review_round`, `request_user_risk_acceptance`, `rescope`, or `abort`. Critical findings never become approved or follow-ups. `follow_up` findings remain durable for Reporter.

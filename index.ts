@@ -12,7 +12,7 @@ import { mergeWorkflowSnapshot, renderWorkflowSnapshot } from "./compaction-stat
 import { resolveSystemOfRecord, updateSystemOfRecord } from "./system-of-record.ts";
 import { parseReviewerOutput } from "./reviewer.ts";
 import { setWorkflowModeEnabled, workflowModeEnabled } from "./thread-mode.ts";
-import { ACTIVE_ROLE_NAMES, getRoleConfig, type RoleName, type ThinkingLevel } from "./roles.ts";
+import { ACTIVE_ROLE_NAMES, getRoleConfig, WORKFLOW_ROLE_NAMES, type RoleName, type ThinkingLevel } from "./roles.ts";
 import { WorkflowStateCache } from "./state-cache.ts";
 import { ingestPlan } from "./plan-ingestion.ts";
 import { renderOrchestratorPlanContext } from "./orchestrator-prompt.ts";
@@ -546,7 +546,7 @@ export default function (pi: ExtensionAPI) {
         throw new Error(`Unable to resume development workflow ${currentId}: ${error.message}`);
       }
     }
-    return { systemPrompt: `${event.systemPrompt}\n\nYou are the development-workflow Orchestrator. Route implementation through workflow-scoped subagents; do not directly perform normal implementation edits. Use stable workflowId and role agentId handles. Never ask a child to re-plan the entire change. Review-cycle limits escalate recoverably; never automatically block, defer, or approve findings.${planContext}` };
+    return { systemPrompt: `${event.systemPrompt}\n\nYou are the development-workflow Orchestrator. Agent profiles and workflow roles are different namespaces. Workflow lifecycle dispatches accept only these exact agentId values: planner, implementer, test-writer, reviewer, reporter. Do not invent or semantically infer workflow roles. Auxiliary profiles such as researcher remain available through ordinary subagent dispatch, for example { agent: "researcher", task: "Investigate ..." }, without lifecycle, workflowId, or agentId. Route implementation through workflow-scoped subagents; do not directly perform normal implementation edits. Use stable workflowId and valid role agentId handles. Never ask a child to re-plan the entire change. Review-cycle limits escalate recoverably; never automatically block, defer, or approve findings.${planContext}` };
   });
 
   // Child policy: at most one bash call per assistant turn; a sibling bash is blocked immediately with combine commands guidance instead of waiting on the mutation mutex.
@@ -558,7 +558,10 @@ export default function (pi: ExtensionAPI) {
     // subagent owns final thinking/token resolution and resume persistence.
     if (event.toolName === "subagent") {
       const input = event.input as { lifecycle?: string; workflowId?: string; agentId?: string; task?: string; thinking?: ThinkingLevel; maxTokens?: unknown; workflowMaxTokens?: unknown; model?: string; freshSession?: boolean };
-      if (input.lifecycle === "workflow" && input.workflowId && input.agentId) {
+      if (input.lifecycle === "workflow") {
+        if (!input.workflowId) throw new Error("Workflow lifecycle dispatch requires workflowId.");
+        if (!input.agentId) throw new Error(`Workflow lifecycle dispatch requires agentId. Valid workflow roles: ${WORKFLOW_ROLE_NAMES.join(", ")}.`);
+        if (!(WORKFLOW_ROLE_NAMES as readonly string[]).includes(input.agentId)) throw new Error(`Invalid workflow agentId "${input.agentId}". Valid workflow roles: ${WORKFLOW_ROLE_NAMES.join(", ")}. Profiles are not workflow roles and semantic aliases are not inferred. For auxiliary research, use ordinary non-workflow dispatch: { agent: "researcher", task: "Investigate ..." } (omit lifecycle, workflowId, and agentId).`);
         // The compact bundle is optional context. A corrupt persisted record must not
         // prevent workflowRoleThinking from using its existing safe default fallback.
         let dispatchState: WorkflowState | undefined;

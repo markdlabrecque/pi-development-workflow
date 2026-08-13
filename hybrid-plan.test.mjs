@@ -61,6 +61,9 @@ test("new state and bounded Orchestrator prompt are planner-free and retain prov
   assert.equal(state.stage, "red_testing"); assert.deepEqual(state.stageSequence, ["red_testing", "implementing", "reviewing", "reporting"]);
   const prompt = promptModule.renderOrchestratorPlanContext(state);
   assert.match(prompt, /truncated/); assert.match(prompt, /a{64}/); assert.match(prompt, /red-test command/);
+  assert.match(prompt, /Agent profiles are not workflow roles/);
+  assert.match(prompt, /planner, implementer, test-writer, reviewer, reporter/);
+  assert.match(prompt, /\{ agent: "researcher", task: "Investigate \.\.\." \}/);
   assert.ok(Buffer.byteLength(prompt) < promptModule.MAX_PLAN_PROMPT_BYTES + 2000);
 });
 
@@ -74,6 +77,25 @@ test("role model resolver fails actionably and accepts only supported explicit o
   await handlers.get("tool_call")({ toolName: "subagent", toolCallId: "dispatch-1", input }, { modelRegistry: registry() });
   assert.equal(input.model, "openai-codex/gpt-5.6-luna");
   await assert.rejects(handlers.get("tool_call")({ toolName: "subagent", toolCallId: "dispatch-2", input: { ...input, model: "openai/other" } }, { modelRegistry: registry() }), /Unsupported workflow role model/);
+});
+
+test("workflow dispatch rejects invented roles while ordinary researcher profiles remain available", async () => {
+  const handlers = new Map();
+  const pi = { events: { emit() {}, on() {} }, on(name, fn) { handlers.set(name, fn); }, registerCommand() {}, registerTool() {}, getActiveTools() { return []; }, setActiveTools() {}, async setModel() { return true; } };
+  developmentWorkflow(pi);
+  const dispatch = handlers.get("tool_call");
+  for (const agentId of ["harness-auditor", "wayfinder-auditor", "auditor", "test_writer"]) {
+    await assert.rejects(dispatch({ toolName: "subagent", toolCallId: `invalid-${agentId}`, input: { lifecycle: "workflow", workflowId: "workflow-1", agentId, agent: "researcher", task: "audit" } }, { modelRegistry: registry() }), error => {
+      assert.match(error.message, new RegExp(`Invalid workflow agentId "${agentId}"`));
+      assert.match(error.message, /planner, implementer, test-writer, reviewer, reporter/);
+      assert.match(error.message, /\{ agent: "researcher", task: "Investigate \.\.\." \}/);
+      assert.match(error.message, /omit lifecycle, workflowId, and agentId/);
+      return true;
+    });
+  }
+  const ordinary = { agent: "researcher", task: "Investigate dispatch behavior" };
+  assert.equal(await dispatch({ toolName: "subagent", toolCallId: "ordinary-research", input: ordinary }, { modelRegistry: registry() }), undefined);
+  assert.deepEqual(ordinary, { agent: "researcher", task: "Investigate dispatch behavior" });
 });
 
 test("start preflight requires explicit acknowledgement of dirty paths", async () => {

@@ -27,6 +27,7 @@ export interface RoleConfig {
  * Pi GPT-5.6 mappings for Claude role analogues. Planner is retained only to
  * resume legacy workflows already in planning; new planning stays foreground.
  */
+export const WORKFLOW_ROLE_NAMES = ["planner", "implementer", "test-writer", "reviewer", "reporter"] as const satisfies readonly RoleName[];
 export const ACTIVE_ROLE_NAMES = ["implementer", "test-writer", "reviewer", "reporter"] as const satisfies readonly RoleName[];
 
 export const DEFAULT_ROLE_CONFIG: Record<RoleName, RoleConfig> = {
