@@ -27,10 +27,10 @@ test("new workflows use the red-first versioned state machine while v3 remains r
 
 test("role routing matches Claude analogs and defaults to two review rounds", async () => {
   const roles = await load("roles.ts");
-  assert.equal(roles.getRoleConfig("test-writer").model, "openai-codex/gpt-5.6-terra");
-  assert.equal(roles.getRoleConfig("implementer").model, "openai-codex/gpt-5.6-terra");
+  assert.equal(roles.getRoleConfig("test-writer").model, "openai-codex/gpt-5.6-luna");
+  assert.equal(roles.getRoleConfig("implementer").model, "openai-codex/gpt-5.6-luna");
   assert.equal(roles.getRoleConfig("reviewer").model, "openai-codex/gpt-5.6-sol");
-  assert.equal(roles.getRoleConfig("reporter").model, "openai-codex/gpt-5.6-terra");
+  assert.equal(roles.getRoleConfig("reporter").model, "openai-codex/gpt-5.6-luna");
   const source = fs.readFileSync(path.join(here, "index.ts"), "utf8");
   assert.match(source, /DEFAULT_MAX_REVIEW_CYCLES = 2/);
   assert.doesNotMatch(source, /ollama\/qwen3\.6-pi/);

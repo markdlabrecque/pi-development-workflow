@@ -21,7 +21,7 @@ import { appendDiagnostic, compactSuccessfulDiagnostics, createDiagnosticEvent, 
 export const WORKFLOW_MODEL_PROVIDER = "openai-codex" as const;
 export const WORKFLOW_MODEL_ID = "gpt-5.6-sol" as const;
 export const WORKFLOW_MODEL = `${WORKFLOW_MODEL_PROVIDER}/${WORKFLOW_MODEL_ID}` as const;
-export const SUPPORTED_WORKFLOW_MODELS = new Set(["openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-sol"]);
+export const SUPPORTED_WORKFLOW_MODELS = new Set(["openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-sol", "openai-codex/gpt-5.6-luna"]);
 const DEFAULT_MAX_REVIEW_CYCLES = 2;
 const MAX_TRACKED_COMPLETION_TOOL_CALLS = 256;
 /** Bounded handoffs preserve the compact artifact contract at workflow dispatch. */
@@ -532,7 +532,7 @@ export default function (pi: ExtensionAPI) {
         // Every Reviewer dispatch uses a fresh session; the stable logical Implementer role retains authority across fixes, while physical attempts are foreground-replaceable after infrastructure failure.
         if (input.agentId === "reviewer") input.freshSession = true;
         // Role defaults follow Claude analogues. Explicit thinking override remains valid; overrides are accepted only
-        // within the supported GPT-5.6 pair and then persisted for stable resume/rounds.
+        // within the supported GPT-5.6 models and then persisted for stable resume/rounds.
         const configured = await workflowRoleModel(input.workflowId, input.agentId, loadState);
         const effective = input.model ?? configured;
         if (!SUPPORTED_WORKFLOW_MODELS.has(effective)) throw new Error(`Unsupported workflow role model ${effective}`);

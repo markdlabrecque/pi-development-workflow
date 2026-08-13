@@ -29,7 +29,7 @@ const { setWorkflowModeEnabled } = await jiti.import(path.join(directory, "threa
 
 async function tempRepo() { const root = await mkdtemp(path.join(os.tmpdir(), "pi-hybrid-plan-")); await mkdir(path.join(root, ".pi")); return root; }
 function registry(model = { provider: workflowExports.WORKFLOW_MODEL_PROVIDER, id: workflowExports.WORKFLOW_MODEL_ID, maxTokens: 32768 }, auth = { ok: true, apiKey: "local" }) {
-  return { find(provider, id) { if (model === null) return undefined; return provider === "openai-codex" && ["gpt-5.6-sol", "gpt-5.6-terra"].includes(id) ? { ...model, provider, id } : undefined; }, async getApiKeyAndHeaders() { return auth; } };
+  return { find(provider, id) { if (model === null) return undefined; return provider === "openai-codex" && ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"].includes(id) ? { ...model, provider, id } : undefined; }, async getApiKeyAndHeaders() { return auth; } };
 }
 
 test("plan ingestion enforces repository bounds, regular files, size, and digest provenance", async () => {
@@ -70,9 +70,9 @@ test("role model resolver fails actionably and accepts only supported explicit o
   const handlers = new Map();
   const pi = { events: { emit() {}, on() {} }, on(name, fn) { handlers.set(name, fn); }, registerCommand() {}, registerTool() {}, getActiveTools() { return []; }, setActiveTools() {}, async setModel() { return true; } };
   developmentWorkflow(pi);
-  const input = { lifecycle: "workflow", workflowId: "missing-state", agentId: "implementer", agent: "implementer", task: "do work", model: "openai-codex/gpt-5.6-terra" };
+  const input = { lifecycle: "workflow", workflowId: "missing-state", agentId: "implementer", agent: "implementer", task: "do work", model: "openai-codex/gpt-5.6-luna" };
   await handlers.get("tool_call")({ toolName: "subagent", toolCallId: "dispatch-1", input }, { modelRegistry: registry() });
-  assert.equal(input.model, "openai-codex/gpt-5.6-terra");
+  assert.equal(input.model, "openai-codex/gpt-5.6-luna");
   await assert.rejects(handlers.get("tool_call")({ toolName: "subagent", toolCallId: "dispatch-2", input: { ...input, model: "openai/other" } }, { modelRegistry: registry() }), /Unsupported workflow role model/);
 });
 
