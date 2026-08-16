@@ -129,7 +129,12 @@ export function createSystemOfRecord(run: CommandRunner = exec) {
     else await run("curl", ["--fail-with-body", "--silent", "--show-error", "--netrc", "--request", "POST", "--header", "Content-Type: application/json", "--data", JSON.stringify({ title, content: { raw: body } }), base], state.repositoryRoot);
   };
   const update = async (state: WorkflowState): Promise<void> => {
-    if (state.systemOfRecord.type === "file") return writeFileWorkplan(state);
+    if (state.systemOfRecord.type === "file") {
+      // Local system-of-record output is final reporting only. In-progress workflow
+      // state is internal and must not create a project .pi/workplans document.
+      if (!state.reporterResult || !["reporting", "completed", "blocked"].includes(state.stage)) return;
+      return writeFileReport(state);
+    }
     if (!["reporting", "completed", "blocked", "aborted"].includes(state.stage)) return;
     if (state.systemOfRecord.type === "github") return gitHub(state);
     if (state.systemOfRecord.type === "gitlab") return gitLab(state);
@@ -152,15 +157,17 @@ export function renderWorkplan(state: WorkflowState, diagnostics?: DiagnosticSum
   const provenance = state.planProvenance ? `Path: \`${state.planProvenance.path}\`\n\nSHA-256: \`${state.planProvenance.digest}\`\n\nIngested: ${state.planProvenance.ingestedAt}` : "_Legacy workflow; approved-plan provenance was not recorded._";
   return `# Development Workplan: ${state.id}\n\n> Current stage: **${state.stage}**  \n> Updated: ${state.updatedAt}\n\n${section("Goal and Scope", state.goal)}${section("Acceptance Criteria", criteria)}${section("Approved Plan Provenance", provenance)}${section("Implementation Plan", state.plan)}${section("Implementation Summary and Changed Files", `${state.implementationSummary ?? "_Not recorded._"}\n\n${files}`)}${section("Tests and Results", tests)}${section("Review Findings", findings)}${section("Fix Cycles", String(state.review.cycleCount))}${section("Follow-up Items", follow)}${section("Execution Metrics and Diagnostics", metrics)}${section("Final Outcome", state.finalOutcome ?? state.blockingReason)}\n`;
 }
-async function writeFileWorkplan(state: WorkflowState): Promise<void> {
-  const safeId = state.id.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const finalReport = Boolean(state.reporterResult && ["reporting", "completed", "blocked"].includes(state.stage));
-  const target = finalReport
-    ? path.join(state.repositoryRoot, "docs", "reports", `${new Date().toISOString().slice(0, 10)}-${safeId}.md`)
-    : path.join(state.repositoryRoot, CONFIG_DIR_NAME, "workplans", `${safeId}.md`);
-  const diagnostics = await diagnosticSummary(state.id);
-  const content = finalReport ? state.reporterResult! : renderWorkplan(state, diagnostics);
-  await withFileMutationQueue(target, async () => { await fs.promises.mkdir(path.dirname(target), { recursive: true }); const temp = `${target}.${process.pid}.tmp`; await fs.promises.writeFile(temp, `${content.trim()}\n`); await fs.promises.rename(temp, target); });
+const safeWorkflowId = (id: string): string => id.replace(/[^a-zA-Z0-9._-]/g, "_");
+
+/** Remove legacy in-progress artifacts; final reports are intentionally preserved. */
+export async function removeInProgressWorkplan(state: WorkflowState): Promise<void> {
+  await fs.promises.rm(path.join(state.repositoryRoot, CONFIG_DIR_NAME, "workplans", `${safeWorkflowId(state.id)}.md`), { force: true });
+}
+
+async function writeFileReport(state: WorkflowState): Promise<void> {
+  const safeId = safeWorkflowId(state.id);
+  const target = path.join(state.repositoryRoot, "docs", "reports", `${new Date().toISOString().slice(0, 10)}-${safeId}.md`);
+  await withFileMutationQueue(target, async () => { await fs.promises.mkdir(path.dirname(target), { recursive: true }); const temp = `${target}.${process.pid}.tmp`; await fs.promises.writeFile(temp, `${state.reporterResult!.trim()}\n`); await fs.promises.rename(temp, target); });
 }
 const operations = createSystemOfRecord();
 export const resolveSystemOfRecord = operations.resolve;

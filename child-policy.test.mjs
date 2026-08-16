@@ -21,7 +21,7 @@ const extensionPath = fileURLToPath(new URL("./index.ts", import.meta.url));
 const workflowExtensionModule = await jiti.import(extensionPath, { default: true });
 const developmentWorkflow = workflowExtensionModule.default ?? workflowExtensionModule;
 const state = await jiti.import("./workflow-state.ts");
-const { setWorkflowModeEnabled } = await jiti.import("./thread-mode.ts");
+const { setActiveWorkflowIds, setWorkflowModeEnabled } = await jiti.import("./thread-mode.ts");
 
 function mockPi(cwd) {
   const handlers = new Map(); const tools = new Map();
@@ -112,6 +112,7 @@ test("foreground policy actions persist accepted decisions, resolve caps, and de
     persisted.stage = "reviewing"; persisted.history = [{ stage: "reviewing", at: persisted.createdAt }];
     state.recordReviewCapEscalation(persisted, { actor: "foreground-orchestrator", at: persisted.createdAt, unresolvedFindingIds: ["finding-1"], unresolvedEvidenceIds: ["gate-1"] });
     await state.saveState(persisted);
+    setActiveWorkflowIds([workflowId]);
     await workflow.execute("override", { action: "override", workflowId, ruleCode: "historical_red_missing", reason: "historical import", decision: "accept_deviation", risk: "missing red", evidence: ["record-1"] }, undefined, undefined, mock.ctx);
     await workflow.execute("resolve", { action: "resolveEscalation", workflowId, escalationChoice: "narrow_fix" }, undefined, undefined, mock.ctx);
     const resolved = await state.loadState(workflowId);
@@ -123,6 +124,6 @@ test("foreground policy actions persist accepted decisions, resolve caps, and de
     await assert.rejects(workflow.execute("child resolve", { action: "resolveEscalation", workflowId, escalationChoice: "abort" }, undefined, undefined, mock.ctx), /may not perform resolveEscalation/);
   } finally {
     for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
-    setWorkflowModeEnabled(false); await state.removeState(workflowId); await rm(cwd, { recursive: true, force: true });
+    setActiveWorkflowIds([]); setWorkflowModeEnabled(false); await state.removeState(workflowId); await rm(cwd, { recursive: true, force: true });
   }
 });

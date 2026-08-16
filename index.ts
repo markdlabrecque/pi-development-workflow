@@ -7,11 +7,11 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { compact, CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { adoptExistingState, applyPolicyDecision, createState, isWorkflowExpired, listStates, loadState, NO_STATE_WRITE, recordReviewCapEscalation, removeState, replaceRoleAttempt, resolveReviewCap, retireState, saveState, satisfyOutcome, transactState, transition, workflowExpirationTime, type FindingCategory, type ReviewCapResolution, type ReviewFinding, type RoleAttemptReplacement, type Stage, type WorkflowState } from "./workflow-state.ts";
+import { adoptExistingState, applyPolicyDecision, createState, isWorkflowExpired, loadState, NO_STATE_WRITE, recordReviewCapEscalation, removeState, replaceRoleAttempt, resolveReviewCap, retireState, saveState, satisfyOutcome, transactState, transition, workflowExpirationTime, type FindingCategory, type ReviewCapResolution, type ReviewFinding, type RoleAttemptReplacement, type Stage, type WorkflowState } from "./workflow-state.ts";
 import { mergeWorkflowSnapshot, renderWorkflowSnapshot } from "./compaction-state.ts";
-import { resolveSystemOfRecord, updateSystemOfRecord } from "./system-of-record.ts";
+import { removeInProgressWorkplan, resolveSystemOfRecord, updateSystemOfRecord } from "./system-of-record.ts";
 import { parseReviewerOutput } from "./reviewer.ts";
-import { setWorkflowModeEnabled, workflowModeEnabled } from "./thread-mode.ts";
+import { activeWorkflowIds, setActiveWorkflowIds, setWorkflowModeEnabled, workflowModeEnabled } from "./thread-mode.ts";
 import { ACTIVE_ROLE_NAMES, getRoleConfig, WORKFLOW_ROLE_NAMES, type RoleName, type ThinkingLevel } from "./roles.ts";
 import { WorkflowStateCache } from "./state-cache.ts";
 import { ingestPlan } from "./plan-ingestion.ts";
@@ -243,9 +243,7 @@ async function repositoryPreflight(cwd: string): Promise<{ branch?: string; dirt
     const [{ stdout: branch }, { stdout: status }, { stdout: worktree }] = await Promise.all([
       execFileAsync("git", ["branch", "--show-current"], { cwd }), execFileAsync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], { cwd }), execFileAsync("git", ["rev-parse", "--show-toplevel"], { cwd }),
     ]);
-    // System-of-record workplans are extension-generated durable artifacts, not user
-    // dirt to be adopted by a subsequent workflow preflight.
-    return { branch: branch.trim() || undefined, dirtyPaths: parsePorcelainV1Z(status).filter(item => !item.startsWith(".pi/workplans/")), worktree: worktree.trim() };
+    return { branch: branch.trim() || undefined, dirtyPaths: parsePorcelainV1Z(status), worktree: worktree.trim() };
   } catch { return { dirtyPaths: [], worktree: path.resolve(cwd) }; }
 }
 /** Clean-start preflight keeps acknowledged unrelated dirty files protected while rejecting this task's stale claims. */
@@ -322,7 +320,18 @@ export default function (pi: ExtensionAPI) {
   // Manual mode is process-local; a trigger grants separate, ephemeral foreground-run
   // activation. Workflow children retain access even though their processes default off.
   let uiCtx: ExtensionContext | undefined;
-  let currentId: string | undefined;
+  const sessionWorkflowIds = new Set<string>(isChildSession() ? [] : activeWorkflowIds());
+  let currentId: string | undefined = [...sessionWorkflowIds].at(-1);
+  const trackWorkflowId = (id: string): void => {
+    currentId = id;
+    sessionWorkflowIds.add(id);
+    if (!isChildSession()) setActiveWorkflowIds(sessionWorkflowIds);
+  };
+  const untrackWorkflowId = (id: string): void => {
+    sessionWorkflowIds.delete(id);
+    currentId = [...sessionWorkflowIds].at(-1);
+    if (!isChildSession()) setActiveWorkflowIds(sessionWorkflowIds);
+  };
   let foregroundActivated = false;
   // Pending/preflight activation is replaced on every input. It becomes a run activation
   // only after agent_start, so handled input cannot authorize a later run.
@@ -359,41 +368,26 @@ export default function (pi: ExtensionAPI) {
   // Short TTL bounds cross-process staleness; transaction/security paths below use disk directly.
   const stateCache = new WorkflowStateCache<WorkflowState>();
   const cachedState = (id: string) => stateCache.get(id, loadState);
-  const cachedStates = () => stateCache.list(listStates);
-  const clearInterruptedWorkflow = async (state: WorkflowState): Promise<void> => {
-    // Stop and forget workflow-scoped children before making this ID reusable. Unlike
-    // terminal close, recovery reset deliberately does not tombstone the workflow ID.
-    await requestSubagentClose(pi, state.id);
+  const foregroundWorkflowIds = (): string[] => [...new Set([...sessionWorkflowIds, ...activeWorkflowIds()])];
+  const isForegroundWorkflowActive = (id: string): boolean => foregroundWorkflowIds().includes(id);
+  const activeSessionStates = async (): Promise<WorkflowState[]> =>
+    (await Promise.all(foregroundWorkflowIds().map(id => cachedState(id)))).filter((state): state is WorkflowState => Boolean(state));
+  const discardSessionWorkflow = async (state: WorkflowState): Promise<void> => {
+    // Workflow state is shared with child processes only for the lifetime of this
+    // foreground session. Cleanup deliberately leaves final reports untouched.
+    let closeError: unknown;
+    try { await requestSubagentClose(pi, state.id); } catch (error) { closeError = error; }
+    // Remove coordination state first so a legacy project-artifact permission error
+    // cannot accidentally leave a workflow recoverable across sessions.
     await removeState(state.id);
+    await removeInProgressWorkplan(state);
     stateCache.delete(state.id);
-    if (currentId === state.id) currentId = undefined;
-    diagnose(state.id, "workflow_reset", { stage: state.stage, outcome: "success" });
-  };
-  const promptInterruptedWorkflow = async (state: WorkflowState, ctx: ExtensionContext): Promise<void> => {
-    if (!ctx.hasUI || typeof ctx.ui.select !== "function") return;
-    const continueChoice = `Continue ${state.id} from ${state.stage}`;
-    const clearChoice = `Clear ${state.id} and start again`;
-    const choice = await ctx.ui.select(
-      "Unfinished development workflow",
-      [continueChoice, clearChoice],
-    );
-    if (choice === continueChoice) {
-      currentId = state.id;
-      ctx.ui.notify(`Continuing workflow ${state.id} from ${state.stage}.`, "info");
-      return;
-    }
-    if (choice === clearChoice) {
-      try {
-        await clearInterruptedWorkflow(state);
-        ctx.ui.notify(`Cleared workflow ${state.id}. Submit the development workflow request again to restart.`, "warning");
-      } catch (error: any) {
-        currentId = state.id;
-        ctx.ui.notify(`Unable to clear workflow ${state.id}; its recovery state was retained: ${error.message}`, "error");
-      }
-    }
+    untrackWorkflowId(state.id);
+    diagnose(state.id, "workflow_discarded", { stage: state.stage, outcome: closeError ? "failure" : "success" });
+    if (closeError) throw closeError;
   };
   const persist = async (state: WorkflowState): Promise<void> => {
-    await saveState(state); currentId = state.id;
+    await saveState(state); trackWorkflowId(state.id);
     stateCache.set(state);
     await updateSystemOfRecord(state);
   };
@@ -420,23 +414,43 @@ export default function (pi: ExtensionAPI) {
     applyThreadMode(ctx);
   };
   pi.on("session_start", async (_event, ctx) => {
-    // A session replacement/reload is a lifecycle boundary; discard prior in-process reads.
+    // Hot reload keeps the current process-local workflow identity. A new process or
+    // replacement session never discovers unfinished state from disk.
     stateCache.clear();
     foregroundActivated = false;
     pendingForegroundActivation = false;
     preflightForegroundActivation = false;
     staleWorkflowNotifications.clear();
+    uiCtx = ctx;
+    if (!isChildSession()) {
+      sessionWorkflowIds.clear();
+      for (const id of activeWorkflowIds()) sessionWorkflowIds.add(id);
+      currentId = [...sessionWorkflowIds].at(-1);
+    }
+    const active = await activeSessionStates();
+    for (const id of [...sessionWorkflowIds]) if (!active.some(state => state.id === id)) untrackWorkflowId(id);
+    refreshStaleWorkflowWarnings(active, ctx);
     applyThreadMode(ctx);
-    uiCtx = ctx; const states = await cachedStates(); refreshStaleWorkflowWarnings(states, ctx); const active = states.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).find(s => !["completed", "aborted"].includes(s.stage)); currentId = active?.id;
     void pruneExpiredDiagnostics().catch(() => undefined);
     if (currentId) diagnose(currentId, "session_start", { metadata: { reason: _event.reason } });
-    // Reload, resume, and process restart can strand a durable workflow between role
-    // stages. Never silently discard it or blindly restart from red_testing: ask the
-    // user whether to resume the exact persisted stage or clear all workflow sessions.
-    if (active) await promptInterruptedWorkflow(active, ctx);
   });
-  pi.on("session_shutdown", event => {
-    if (currentId) diagnose(currentId, "session_shutdown", { metadata: { reason: event.reason } });
+  pi.on("session_shutdown", async event => {
+    const endingIds = [...sessionWorkflowIds];
+    for (const id of endingIds) diagnose(id, "session_shutdown", { metadata: { reason: event.reason } });
+    if (!isChildSession() && event.reason !== "reload") {
+      for (const id of endingIds) {
+        try {
+          const state = await loadState(id);
+          if (state) await discardSessionWorkflow(state);
+          else untrackWorkflowId(id);
+        } catch (error: any) {
+          // State removal is attempted even when child cleanup fails. Report the failure,
+          // but never offer cross-session recovery on the next startup.
+          untrackWorkflowId(id);
+          if (uiCtx?.hasUI) uiCtx.ui.notify(`Workflow session cleanup failed for ${id}: ${error.message}`, "error");
+        }
+      }
+    }
     foregroundActivated = false; pendingForegroundActivation = false; preflightForegroundActivation = false; completionToolCalls.clear(); staleWorkflowNotifications.clear(); uiCtx = undefined; stateCache.clear();
   });
   // A canceled or otherwise ended low-level run has no future foreground result message.
@@ -479,7 +493,9 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_before_compact", async (event, ctx) => {
     if (currentId) diagnose(currentId, "compaction_start", { metadata: { reason: event.reason, willRetry: event.willRetry } });
     try {
-      const snapshot = renderWorkflowSnapshot(await listStates());
+      const snapshotIds = workflowChild() ? [workflowChild()!.workflowId] : foregroundWorkflowIds();
+      const snapshotStates = (await Promise.all(snapshotIds.map(id => loadState(id)))).filter((state): state is WorkflowState => Boolean(state));
+      const snapshot = renderWorkflowSnapshot(snapshotStates);
       if (!snapshot || !ctx.model) {
         if (currentId) diagnose(currentId, "compaction_end", { outcome: "success", metadata: { fallback: "no active workflow snapshot or model" } });
         return;
@@ -560,6 +576,7 @@ export default function (pi: ExtensionAPI) {
       const input = event.input as { lifecycle?: string; workflowId?: string; agentId?: string; task?: string; thinking?: ThinkingLevel; maxTokens?: unknown; workflowMaxTokens?: unknown; model?: string; freshSession?: boolean };
       if (input.lifecycle === "workflow") {
         if (!input.workflowId) throw new Error("Workflow lifecycle dispatch requires workflowId.");
+        if (!isChildSession() && !isForegroundWorkflowActive(input.workflowId)) throw new Error(`Workflow ${input.workflowId} is not active in this foreground session.`);
         if (!input.agentId) throw new Error(`Workflow lifecycle dispatch requires agentId. Valid workflow roles: ${WORKFLOW_ROLE_NAMES.join(", ")}.`);
         if (!(WORKFLOW_ROLE_NAMES as readonly string[]).includes(input.agentId)) throw new Error(`Invalid workflow agentId "${input.agentId}". Valid workflow roles: ${WORKFLOW_ROLE_NAMES.join(", ")}. Profiles are not workflow roles and semantic aliases are not inferred. For auxiliary research, use ordinary non-workflow dispatch: { agent: "researcher", task: "Investigate ..." } (omit lifecycle, workflowId, and agentId).`);
         // The compact bundle is optional context. A corrupt persisted record must not
@@ -616,17 +633,14 @@ export default function (pi: ExtensionAPI) {
 
   const closeState = async (state: WorkflowState): Promise<string> => {
     // The subagent action owns its session/diagnostic policy. Keep development state until
-    // that action succeeds, so callers can retry a failed close without losing recovery data.
+    // that action succeeds so explicit terminal cleanup remains retryable in this session.
     diagnose(state.id, "cleanup_start", { stage: state.stage });
     const startedAt = Date.now();
     try {
       const text = await requestSubagentClose(pi, state.id);
       await retireState(state.id);
     stateCache.delete(state.id);
-    if (currentId === state.id) {
-      const next = (await listStates()).filter(candidate => !["completed", "blocked", "aborted"].includes(candidate.stage)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-      currentId = next?.id;
-    }
+    untrackWorkflowId(state.id);
       const cleanupEvent = createDiagnosticEvent(state.id, "cleanup_end", { sessionId: sessionId(), runId: activeRunId, stage: state.stage, durationMs: Date.now() - startedAt, outcome: "success" });
       await appendDiagnostic(cleanupEvent).catch(() => undefined);
       if (state.stage === "completed") {
@@ -702,7 +716,7 @@ export default function (pi: ExtensionAPI) {
     else if (s.stage === "aborted") ctx.ui.notify(`Workflow ${s.id} aborted: ${s.blockingReason ?? "unknown"}`, "warning");
   };
 
-  pi.registerTool({ name: "development_workflow", label: "Development Workflow", description: "Create, persist, route, inspect, and close structured development workflows. The foreground agent remains the Orchestrator; dispatch role jobs through workflow-scoped subagents.", promptSnippet: "Manage persistent staged software-development workflows", parameters: Params,
+  pi.registerTool({ name: "development_workflow", label: "Development Workflow", description: "Create, route, inspect, and close structured development workflows for the current foreground session. The foreground agent remains the Orchestrator; dispatch role jobs through workflow-scoped subagents.", promptSnippet: "Manage session-scoped staged software-development workflows", parameters: Params,
     async execute(_id, p, _signal, _update, ctx) {
       uiCtx = ctx;
       // Guard execution as well as the active-tool list: queued/stale calls or another
@@ -750,7 +764,7 @@ export default function (pi: ExtensionAPI) {
           throw new Error("Approved plan acceptance criteria require executable evidence and an architecture contract before implementation.");
         }
         const sor = await resolveSystemOfRecord(preflight.worktree, ctx.isProjectTrusted(), p.approveDetectedIntegration ?? false);
-        if (p.mode === "recovery") throw new Error("start does not accept recovery mode; load the durable workflow instead");
+        if (p.mode === "recovery") throw new Error("start does not accept recovery mode");
         if (p.mode === "adopt_existing" && !p.inventory?.length) throw new Error("adopt_existing inventory is required");
         const state = createState({ id, goal: p.goal, acceptanceCriteria: p.acceptanceCriteria, repositoryRoot: preflight.worktree, systemOfRecord: sor, mode: p.mode as "new" | "adopt_existing" | undefined });
         if (p.mode === "adopt_existing") {
@@ -781,14 +795,24 @@ export default function (pi: ExtensionAPI) {
         if (p.expiresAt !== undefined) state.expiresAt = p.expiresAt;
         await persist(state);
         diagnose(id, "workflow_start", { stage: state.stage, model: WORKFLOW_MODEL, planPath: approvedPlan.path, planDigest: approvedPlan.digest, metadata: { planBytes: approvedPlan.bytes, maxReviewCycles: state.review.maxReviewCycles } });
-        refreshStaleWorkflowWarnings(await cachedStates(), ctx);
+        refreshStaleWorkflowWarnings(await activeSessionStates(), ctx);
         return { content: [{ type: "text", text: `Started ${id} in red_testing with approved plan ${approvedPlan.path} (${approvedPlan.digest}). Dispatch test-writer first with lifecycle=workflow, workflowId=${id}, agentId=test-writer.` }], details: state };
       } catch (error: any) {
         const rejectedId = p.workflowId ?? "unassigned";
         await appendDiagnostic(createDiagnosticEvent(rejectedId, "action_rejected", { sessionId: sessionId(), runId: activeRunId, outcome: "failure", error: normalizeDiagnosticError(error), metadata: { action: "start" } })).catch(() => undefined);
         throw error;
       }
-      if (p.action === "status") { if (!p.workflowId) { const all = await cachedStates(); refreshStaleWorkflowWarnings(all, ctx); return { content: [{ type: "text", text: all.map(state => statusText(state)).join("\n\n") || "No workflows." }], details: all }; } const s = await required(p.workflowId, cachedState); refreshStaleWorkflowWarnings(await cachedStates(), ctx); return { content: [{ type: "text", text: statusText(s) }], details: s }; }
+      if (!isChildSession() && p.workflowId && !isForegroundWorkflowActive(p.workflowId)) throw new Error(`Workflow ${p.workflowId} is not active in this foreground session.`);
+      if (p.action === "status") {
+        if (!p.workflowId) {
+          const active = await activeSessionStates();
+          refreshStaleWorkflowWarnings(active, ctx);
+          return { content: [{ type: "text", text: active.map(state => statusText(state)).join("\n\n") || "No workflows." }], details: active };
+        }
+        const s = await required(p.workflowId, cachedState);
+        refreshStaleWorkflowWarnings(await activeSessionStates(), ctx);
+        return { content: [{ type: "text", text: statusText(s) }], details: s };
+      }
       if (p.action === "close") {
         const s = await required(p.workflowId, loadState);
         if (!["completed", "blocked", "aborted"].includes(s.stage)) throw new Error("Only terminal workflows can be closed");
@@ -804,7 +828,7 @@ export default function (pi: ExtensionAPI) {
           throw new Error("Policy override was rejected by the closed state policy");
         }
         const { state: accepted } = await transactState(current.id, s => { const result = applyPolicyDecision(s, decision as any); if (!result.accepted) throw new Error("Policy override was rejected by the closed state policy"); });
-        stateCache.set(accepted); currentId = accepted.id; diagnose(accepted.id, "policy_override", { stage: accepted.stage, metadata: { ruleCode: p.ruleCode } });
+        stateCache.set(accepted); trackWorkflowId(accepted.id); diagnose(accepted.id, "policy_override", { stage: accepted.stage, metadata: { ruleCode: p.ruleCode } });
         await updateRecordAfterCommit(accepted);
         return { content: [{ type: "text", text: statusText(accepted) }], details: accepted };
       }
@@ -935,7 +959,7 @@ export default function (pi: ExtensionAPI) {
       // The transaction has durably committed. Notify before external SoR I/O so a
       // reporter failure cannot hide an already-persisted terminal transition.
       notifyTerminalTransition(mutation.result, s, ctx);
-      currentId = s.id;
+      trackWorkflowId(s.id);
       stateCache.set(s);
       await updateRecordAfterCommit(s);
       return { content: [{ type: "text", text: statusText(s) }], details: s };
@@ -951,19 +975,11 @@ export default function (pi: ExtensionAPI) {
     try { if (ctx.hasUI) ctx.ui.notify(renderDiagnosticSummary(await summarizeDiagnostics(id)), "info"); }
     catch (error: any) { if (ctx.hasUI) ctx.ui.notify(`Unable to read workflow diagnostics: ${error.message}`, "error"); }
   } });
-  pi.registerCommand("workflow-recover", { description: "continue or clear an unfinished development workflow", handler: async (args, ctx) => {
-    const id = args.trim() || currentId;
-    if (!id) { if (ctx.hasUI) ctx.ui.notify("No unfinished workflow", "warning"); return; }
-    try {
-      const state = await loadState(id);
-      if (!state || ["completed", "aborted"].includes(state.stage)) { if (ctx.hasUI) ctx.ui.notify(`No unfinished workflow ${id}`, "warning"); return; }
-      await promptInterruptedWorkflow(state, ctx);
-    } catch (error: any) { if (ctx.hasUI) ctx.ui.notify(`Unable to recover workflow ${id}: ${error.message}`, "error"); }
-  } });
   for (const [name, action] of [["workflow-status", "status"], ["workflow-abort", "abort"]] as const) pi.registerCommand(name, { description: `${action} development workflow`, handler: async (args, ctx) => {
     const id = args.trim() || currentId;
     if (!id) { if (ctx.hasUI) ctx.ui.notify("No active workflow", "warning"); return; }
-    if (action === "status") { const s = await cachedState(id); refreshStaleWorkflowWarnings(await cachedStates(), ctx); if (ctx.hasUI) ctx.ui.notify(s ? statusText(s) : `Unknown workflow ${id}`, s ? "info" : "error"); }
+    if (!isForegroundWorkflowActive(id)) { if (ctx.hasUI) ctx.ui.notify(`Workflow ${id} is not active in this foreground session.`, "error"); return; }
+    if (action === "status") { const s = await cachedState(id); refreshStaleWorkflowWarnings(await activeSessionStates(), ctx); if (ctx.hasUI) ctx.ui.notify(s ? statusText(s) : `Unknown workflow ${id}`, s ? "info" : "error"); }
     else {
       try {
         const { state: s, result: previousStage } = await transactState(id, async current => {

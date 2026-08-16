@@ -38,8 +38,8 @@ This document is the executable-policy design record. `HARD` rules are not overr
 | `stable_logical_roles` | Fixes return to the stable logical Implementer; Reviewers are independently replaceable; transport failures do not change authority (`README`, prompts, global policies). | HARD authority; ADVISORY physical-session reuse | Logical-role state, attempt records, replacement authorization. |
 | `skip_expiry_guard` | Every deliberate skip/descope/ignore/dependency TODO has a guard that fails when its reason disappears (`README`, prompts, global policies). | OUTCOME | Artifact/report validator; deviation requires `expiry_guard_inapplicable` with evidence. |
 | `report_fidelity` | Reporter states built/not built, commands/results, verdict, deviations, unresolved risks, failures, skips, and every follow-up without softening (`README`, reporter prompt, global policies). | HARD for truthful persisted content; no override | Reporter validator and system-of-record writer. |
-| `posting_recovery` | Posting failure preserves technical state/result and recovery data (`README`, reporter prompt, `index.ts`). | HARD | Commit state before external I/O and record failure diagnostics. |
-| `state_integrity_recovery` | Durable state is validated, locked, lazily migrated, resumable, non-resurrectable, and removable only after coordinated terminal cleanup (`README`, `workflow-state.ts`, `index.ts`). | HARD | State module and cleanup transaction. |
+| `posting_failure_integrity` | Posting failure preserves technical state/result for inspection during the active session (`README`, reporter prompt, `index.ts`). | HARD | Commit state before external I/O and record failure diagnostics. |
+| `state_integrity` | Session coordination state is validated, locked, lazily migrated, non-resurrectable, and removed after coordinated terminal or session cleanup (`README`, `workflow-state.ts`, `index.ts`). | HARD | State module and cleanup transaction. |
 | `diagnostic_integrity` | Diagnostics are append-only/bounded/redacted, identify failures and evidence authors, and remain consistent with state summaries (`README`, diagnostics/index). | HARD for redaction/integrity; OUTCOME for completeness | Diagnostic schema plus consistency tests. |
 | `model_authorization` | Workflow models are provider-qualified, supported, available, authenticated, and persisted; malformed state cannot inject CLI values (`README`, roles/index). | HARD | Dispatch-time resolver and strict state validation. |
 | `activation_scope` | Workflow tool is off by default and activated only by explicit foreground trigger/manual mode; queued/child fragments cannot gain foreground authority (`README`, `index.ts`). | HARD | Input lifecycle and execute-time guard. |
@@ -51,7 +51,7 @@ This document is the executable-policy design record. `HARD` rules are not overr
 ## Architecture contract
 
 1. The extension owns deterministic authorization, canonical repository/worktree selection, state migration and atomic persistence, idempotency, artifact validation, file/session authority, hard-invariant enforcement, diagnostics, and system-of-record writes.
-2. The foreground Orchestrator owns mode selection (`new`, `adopt_existing`, `recovery`), contextual sequencing, risk evaluation, accepted provenance, escalation resolution, rescope, and abort decisions.
+2. The foreground Orchestrator owns new-work mode selection (`new`, `adopt_existing`), contextual sequencing, risk evaluation, accepted provenance, escalation resolution, rescope, and abort decisions. Legacy `recovery` state is migration compatibility only.
 3. Every departure from an outcome default is a structured durable decision with a closed rule code, reason, decision, risk, actor, timestamp, and supporting evidence. Rejected attempts are diagnostic events and cannot mutate authorization state.
 4. Prompts describe responsibilities, defaults, risks, and admissible actions. They cannot grant authority, create an override code, bypass artifact validation, or weaken a hard invariant.
 5. Transitions are outcome-based: durable state records satisfied/missing outcomes and computes admissible next actions. `stage` remains a resumable projection for compatibility, not the source of authority.
@@ -66,14 +66,14 @@ The implementation test matrix uses temporary Git repositories and, where specif
 |---|---|
 | New work | Starts in `new`; red-first is the default; targeted red provenance is durable; green/review/report outcomes lead to completion. |
 | Adopt existing | Starts in a separate selected worktree; inventories branch/commits/dirt/tests/plan/report/issue provenance; foreground accepts each inherited artifact; only missing outcomes are dispatched. |
-| Recovery | Loads versions 1-4 lazily into v5; resumes from durable satisfied outcomes without synthetic replay or hand editing. |
+| Legacy migration | Loads versions 1-4 lazily into v5 when encountered by an active session, without startup scanning or cross-session continuation. |
 | Review-cap escalation | Cap persists a recoverable escalation and choices; critical findings never become approved; narrow fix can proceed with targeted proof and final full-green evidence without another automatic review. |
 | Authorized override | A closed soft-rule code with complete justification persists accepted decision and diagnostic audit, changes admissible actions, and appears in final Reporter content. |
 | Denied override | Attempt against production, trust/remote, child/role, dirt/ownership, reviewer-read-only, state integrity, or green-release boundary is rejected, diagnosed, and leaves state/authority unchanged. |
 | Worktree-local plan | Explicit target repository/worktree drives preflight and plan ingestion; an in-root plan is accepted even when the foreground cwd is another worktree; escape paths are rejected. |
 | Atomic review routing | One operation records independent gate evidence and findings or references evidence by ID; idempotency retries do not duplicate evidence/findings/cycles/diagnostics. |
 | Infrastructure replacement | Transport/process/stale-context/compaction failure records reason/role/attempt/exit/duration/usage; foreground replacement preserves logical authority and claims; failure consumes no review cycle. |
-| Final reporting | Reporter output contains selected mode, accepted deviations, rejected/failed actions when relevant, unresolved risks, all follow-ups, and exact red/green/review evidence; posting failure is recoverable. |
+| Final reporting | Reporter output contains selected mode, accepted deviations, rejected/failed actions when relevant, unresolved risks, all follow-ups, and exact red/green/review evidence; posting failure remains inspectable during the active session. |
 | Consistency | State test/review/attempt counters derive from or reconcile with diagnostic events after retries and reload. |
 | Non-regression | Existing authorization, state lock/tombstone, system-of-record trust, cleanup, production safety, model resolution, activation, compaction, and subagent mutation tests remain green. |
 

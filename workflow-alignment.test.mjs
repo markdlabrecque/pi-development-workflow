@@ -12,6 +12,9 @@ const piRoot = path.join(globalNodeModules, "@earendil-works", "pi-coding-agent"
 const piRequire = createRequire(path.join(piRoot, "package.json"));
 const jiti = piRequire("jiti")(import.meta.url, { moduleCache: false, alias: { "@earendil-works/pi-coding-agent": path.join(piRoot, "dist", "index.js") } });
 const load = name => jiti.import(path.join(here, name));
+const piPolicyPath = path.join(process.env.HOME, ".pi/agent/AGENTS.md");
+const claudePolicyPath = path.join(process.env.HOME, ".claude/CLAUDE.md");
+const globalPoliciesAvailable = fs.existsSync(piPolicyPath) && fs.existsSync(claudePolicyPath);
 
 test("new workflows use the red-first versioned state machine while v3 remains recoverable", async () => {
   const state = await load("workflow-state.ts");
@@ -36,9 +39,9 @@ test("role routing matches Claude analogs and defaults to two review rounds", as
   assert.doesNotMatch(source, /ollama\/qwen3\.6-pi/);
 });
 
-test("Pi policy and role prompts retain the enforceable workflow contract", () => {
-  const piPolicy = fs.readFileSync(path.join(process.env.HOME, ".pi/agent/AGENTS.md"), "utf8");
-  const claudePolicy = fs.readFileSync(path.join(process.env.HOME, ".claude/CLAUDE.md"), "utf8");
+test("Pi policy and role prompts retain the enforceable workflow contract", { skip: !globalPoliciesAvailable }, () => {
+  const piPolicy = fs.readFileSync(piPolicyPath, "utf8");
+  const claudePolicy = fs.readFileSync(claudePolicyPath, "utf8");
   for (const phrase of ["production servers", "uv sync --extra dev", "tracer bullets", "worktree", "Firefox", "Chromium"]) {
     assert.match(piPolicy.toLowerCase(), new RegExp(phrase.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(claudePolicy.toLowerCase(), new RegExp(phrase.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -52,9 +55,9 @@ test("Pi policy and role prompts retain the enforceable workflow contract", () =
   assert.match(prompts.reporter, /docs\/reports\/YYYY-MM-DD-<task-slug>\.md/);
 });
 
-test("ratified constitutional core is platform-translated while workflow sequencing stays contextual", () => {
-  const piPolicy = fs.readFileSync(path.join(process.env.HOME, ".pi/agent/AGENTS.md"), "utf8");
-  const claudePolicy = fs.readFileSync(path.join(process.env.HOME, ".claude/CLAUDE.md"), "utf8");
+test("ratified constitutional core is platform-translated while workflow sequencing stays contextual", { skip: !globalPoliciesAvailable }, () => {
+  const piPolicy = fs.readFileSync(piPolicyPath, "utf8");
+  const claudePolicy = fs.readFileSync(claudePolicyPath, "utf8");
   const readme = fs.readFileSync(path.join(here, "README.md"), "utf8");
   const prompts = Object.fromEntries(["test-writer", "implementer", "reviewer", "reporter"].map(role => [role, fs.readFileSync(path.join(here, "agents", `${role}.md`), "utf8")]));
 

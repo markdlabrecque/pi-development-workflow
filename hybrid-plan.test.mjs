@@ -25,7 +25,7 @@ const promptModule = await jiti.import(path.join(directory, "orchestrator-prompt
 const workflowExports = await jiti.import(path.join(directory, "index.ts"));
 const workflowModule = await jiti.import(path.join(directory, "index.ts"), { default: true });
 const developmentWorkflow = workflowModule.default ?? workflowModule;
-const { setWorkflowModeEnabled } = await jiti.import(path.join(directory, "thread-mode.ts"));
+const { setActiveWorkflowIds, setWorkflowModeEnabled } = await jiti.import(path.join(directory, "thread-mode.ts"));
 
 async function tempRepo() { const root = await mkdtemp(path.join(os.tmpdir(), "pi-hybrid-plan-")); await mkdir(path.join(root, ".pi")); return root; }
 function registry(model = { provider: workflowExports.WORKFLOW_MODEL_PROVIDER, id: workflowExports.WORKFLOW_MODEL_ID, maxTokens: 32768 }, auth = { ok: true, apiKey: "local" }) {
@@ -74,9 +74,11 @@ test("role model resolver fails actionably and accepts only supported explicit o
   const pi = { events: { emit() {}, on() {} }, on(name, fn) { handlers.set(name, fn); }, registerCommand() {}, registerTool() {}, getActiveTools() { return []; }, setActiveTools() {}, async setModel() { return true; } };
   developmentWorkflow(pi);
   const input = { lifecycle: "workflow", workflowId: "missing-state", agentId: "implementer", agent: "implementer", task: "do work", model: "openai-codex/gpt-5.6-luna" };
+  setActiveWorkflowIds(["missing-state"]);
   await handlers.get("tool_call")({ toolName: "subagent", toolCallId: "dispatch-1", input }, { modelRegistry: registry() });
   assert.equal(input.model, "openai-codex/gpt-5.6-luna");
   await assert.rejects(handlers.get("tool_call")({ toolName: "subagent", toolCallId: "dispatch-2", input: { ...input, model: "openai/other" } }, { modelRegistry: registry() }), /Unsupported workflow role model/);
+  setActiveWorkflowIds([]);
 });
 
 test("workflow dispatch rejects invented roles while ordinary researcher profiles remain available", async () => {
@@ -84,6 +86,7 @@ test("workflow dispatch rejects invented roles while ordinary researcher profile
   const pi = { events: { emit() {}, on() {} }, on(name, fn) { handlers.set(name, fn); }, registerCommand() {}, registerTool() {}, getActiveTools() { return []; }, setActiveTools() {}, async setModel() { return true; } };
   developmentWorkflow(pi);
   const dispatch = handlers.get("tool_call");
+  setActiveWorkflowIds(["workflow-1"]);
   for (const agentId of ["harness-auditor", "wayfinder-auditor", "auditor", "test_writer"]) {
     await assert.rejects(dispatch({ toolName: "subagent", toolCallId: `invalid-${agentId}`, input: { lifecycle: "workflow", workflowId: "workflow-1", agentId, agent: "researcher", task: "audit" } }, { modelRegistry: registry() }), error => {
       assert.match(error.message, new RegExp(`Invalid workflow agentId "${agentId}"`));
@@ -96,6 +99,7 @@ test("workflow dispatch rejects invented roles while ordinary researcher profile
   const ordinary = { agent: "researcher", task: "Investigate dispatch behavior" };
   assert.equal(await dispatch({ toolName: "subagent", toolCallId: "ordinary-research", input: ordinary }, { modelRegistry: registry() }), undefined);
   assert.deepEqual(ordinary, { agent: "researcher", task: "Investigate dispatch behavior" });
+  setActiveWorkflowIds([]);
 });
 
 test("start preflight requires explicit acknowledgement of dirty paths", async () => {

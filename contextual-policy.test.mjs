@@ -24,7 +24,7 @@ const developmentWorkflow = extensionModule.default ?? extensionModule;
 const state = await jiti.import(path.join(directory, "workflow-state.ts"));
 const diagnostics = await jiti.import(path.join(directory, "diagnostics.ts"));
 const prompt = await jiti.import(path.join(directory, "orchestrator-prompt.ts"));
-const { setWorkflowModeEnabled } = await jiti.import(path.join(directory, "thread-mode.ts"));
+const { activeWorkflowIds, setActiveWorkflowIds, setWorkflowModeEnabled } = await jiti.import(path.join(directory, "thread-mode.ts"));
 
 function git(cwd, args) { const result = spawnSync("git", args, { cwd, encoding: "utf8" }); assert.equal(result.status, 0, result.stderr); }
 function registry() { return { find: () => ({ provider: "openai-codex", id: "gpt-5.6-terra", maxTokens: 32768 }), getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "local" }) }; }
@@ -34,6 +34,7 @@ function fixture(cwd) {
   return { tool: tools.get("development_workflow"), ctx: { cwd, hasUI: false, modelRegistry: registry(), isProjectTrusted: () => false, sessionManager: {}, ui: { setStatus() {}, notify() {} } } };
 }
 async function clean(workflowId, roots = []) { await state.removeState(workflowId).catch(() => undefined); await rm(diagnostics.diagnosticsDir(workflowId), { recursive: true, force: true }); await Promise.all(roots.map(root => rm(root, { recursive: true, force: true }))); setWorkflowModeEnabled(false); }
+function activate(workflowId) { setActiveWorkflowIds([...activeWorkflowIds(), workflowId]); }
 
 // Contract interpretation: targetRepository is the canonical repository and targetWorktree
 // is its selected linked worktree; inventory entries carry their own foreground acceptance.
@@ -95,7 +96,7 @@ test("contextual policy: selected worktree, adopted provenance, atomic review, r
 
     await t.test("routeReview is atomic and idempotent, while review cap creates recoverable escalation", async () => {
       const workflowId = `context-review-${Date.now()}`; ids.push(workflowId);
-      const persisted = state.createState({ id: workflowId, goal: "review", repositoryRoot: worktree }); persisted.stage = "reviewing"; persisted.history = [{ stage: "reviewing", at: persisted.createdAt }]; persisted.review.maxReviewCycles = 1; await state.saveState(persisted);
+      const persisted = state.createState({ id: workflowId, goal: "review", repositoryRoot: worktree }); persisted.stage = "reviewing"; persisted.history = [{ stage: "reviewing", at: persisted.createdAt }]; persisted.review.maxReviewCycles = 1; await state.saveState(persisted); activate(workflowId);
       const input = { action: "routeReview", workflowId, idempotencyKey: "review-001", suspectedWeakness: "boundary", testCommand: "node --test", testPassed: true, testOutput: "pass", findings: [{ category: "must_fix", title: "edge", detail: "reproduced" }] };
       const first = await tool.execute("review-1", input, undefined, undefined, ctx);
       const second = await tool.execute("review-retry", input, undefined, undefined, ctx);
@@ -113,7 +114,7 @@ test("contextual policy: selected worktree, adopted provenance, atomic review, r
       const workflowId = `context-post-cap-${Date.now()}`; ids.push(workflowId);
       const persisted = state.createState({ id: workflowId, goal: "post-cap", repositoryRoot: worktree });
       persisted.stage = "reviewing"; persisted.history = [{ stage: "reviewing", at: persisted.createdAt }]; persisted.review.maxReviewCycles = 1;
-      await state.saveState(persisted);
+      await state.saveState(persisted); activate(workflowId);
       const review = { action: "routeReview", workflowId, idempotencyKey: "review-stage-change", suspectedWeakness: "retry boundary", testCommand: "node --test", testPassed: true, testOutput: "pass", findings: [{ category: "must_fix", title: "critical", detail: "reproduced" }] };
       process.env.PI_SUBAGENT_ID = `workflow-${workflowId}:reviewer`; process.env.PI_WORKFLOW_ID = workflowId; process.env.PI_WORKFLOW_ROLE = "reviewer";
       await tool.execute("review-first", review, undefined, undefined, ctx);
@@ -132,7 +133,7 @@ test("contextual policy: selected worktree, adopted provenance, atomic review, r
 
     await t.test("replaceAttempt is foreground-only, auditable, and does not consume review cycles", async () => {
       const workflowId = `context-replace-${Date.now()}`; ids.push(workflowId);
-      const persisted = state.createState({ id: workflowId, goal: "replace", repositoryRoot: worktree }); persisted.stage = "fixing"; persisted.review.cycleCount = 1; persisted.agentHandles.implementer = "logical-implementer"; await state.saveState(persisted);
+      const persisted = state.createState({ id: workflowId, goal: "replace", repositoryRoot: worktree }); persisted.stage = "fixing"; persisted.review.cycleCount = 1; persisted.agentHandles.implementer = "logical-implementer"; await state.saveState(persisted); activate(workflowId);
       const replacement = { action: "replaceAttempt", workflowId, role: "implementer", failure: { reason: "transport timeout", exitCode: 124, durationMs: 500, usage: { input: 7, output: 3, turns: 1 } }, replacementAttemptId: "attempt-2" };
       const replaced = await tool.execute("replace", replacement, undefined, undefined, ctx);
       assert.equal(replaced.details.review.cycleCount, 1); assert.equal(replaced.details.agentHandles.implementer, "logical-implementer");
@@ -164,7 +165,7 @@ test("contextual policy: selected worktree, adopted provenance, atomic review, r
 
     await t.test("rejections are normalized and Reporter requires deviations and unresolved risks", async () => {
       const workflowId = `context-report-${Date.now()}`; ids.push(workflowId);
-      const persisted = state.createState({ id: workflowId, goal: "report", repositoryRoot: worktree }); persisted.stage = "reporting"; persisted.acceptedDeviations = [{ code: "historical_red_missing", reason: "imported history", decision: "accept_deviation", risk: "legacy evidence cannot be rerun", actor: "foreground-orchestrator", at: persisted.createdAt, evidence: ["inventory-1"] }]; persisted.unresolvedRisks = ["unresolved posting failure"];  await state.saveState(persisted);
+      const persisted = state.createState({ id: workflowId, goal: "report", repositoryRoot: worktree }); persisted.stage = "reporting"; persisted.acceptedDeviations = [{ code: "historical_red_missing", reason: "imported history", decision: "accept_deviation", risk: "legacy evidence cannot be rerun", actor: "foreground-orchestrator", at: persisted.createdAt, evidence: ["inventory-1"] }]; persisted.unresolvedRisks = ["unresolved posting failure"];  await state.saveState(persisted); activate(workflowId);
       await assert.rejects(tool.execute("incomplete-report", { action: "report", workflowId, reporterContent: "# Report\nEverything passed." }, undefined, undefined, ctx), /accepted deviation.*unresolved risk/i);
       await assert.rejects(tool.execute("heading-only-report", { action: "report", workflowId, reporterContent: "# Report\nAccepted deviations\nUnresolved risks" }, undefined, undefined, ctx), /materially state/);
       for (const omitted of ["historical_red_missing", "imported history", "accept_deviation", "legacy evidence cannot be rerun", "inventory-1", "unresolved posting failure"]) {
@@ -176,6 +177,7 @@ test("contextual policy: selected worktree, adopted provenance, atomic review, r
       assert.ok(events.some(event => event.type === "action_rejected" && event.metadata?.action === "advance" && event.error?.name && event.error?.message));
     });
   } finally {
+    setActiveWorkflowIds([]);
     for (const workflowId of ids) await clean(workflowId);
     for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     await rm(worktree, { recursive: true, force: true }); await rm(repository, { recursive: true, force: true }); await rm(elsewhere, { recursive: true, force: true });

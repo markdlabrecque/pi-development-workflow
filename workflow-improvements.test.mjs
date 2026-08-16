@@ -30,13 +30,14 @@ const { validateToolArguments } = await import(path.join(nodeModules, "@earendil
 
 const originalSubagentId = process.env.PI_SUBAGENT_ID;
 const workflowStateModule = await jiti.import(path.join(path.dirname(extensionPath), "workflow-state.ts"));
-const { setWorkflowModeEnabled: setWfMode } = await jiti.import("./thread-mode.ts");
+const { activeWorkflowIds, setActiveWorkflowIds, setWorkflowModeEnabled: setWfMode } = await jiti.import("./thread-mode.ts");
 
 // Helper to ensure workflow mode is enabled (reset process-global state)
 function resetWorkflowMode() {
   delete process.env.PI_SUBAGENT_ID;
   delete process.env.PI_WORKFLOW_ID;
   delete process.env.PI_WORKFLOW_ROLE;
+  setActiveWorkflowIds([]);
   setWfMode(true);
 }
 function auditableReporterContent(current) {
@@ -146,31 +147,34 @@ async function startWithWorkflow(mock) {
   await emit(mock, "session_start", { reason: "startup" });
 }
 
-test("unfinished workflow recovery prompts to continue or clear and restart", async () => {
-  const workdir = await mkdtemp(path.join(os.tmpdir(), "workflow-recovery-prompt-"));
-  const workflowId = `recovery-prompt-${Date.now()}`;
+test("unfinished workflows are session-scoped, cleaned on exit, and never offered for recovery", async () => {
+  const workdir = await mkdtemp(path.join(os.tmpdir(), "workflow-session-scope-"));
+  const workflowId = `session-scope-${Date.now()}`;
   resetWorkflowMode();
   const mock = createMockPi();
   mock.ctx.cwd = workdir;
+  const workflow = mock.tools.get("development_workflow");
+  const legacyWorkplan = path.join(workdir, ".pi", "workplans", `${workflowId}.md`);
   try {
-    await workflowStateModule.saveState(workflowStateModule.createState({ id: workflowId, goal: "recover interrupted dispatch", repositoryRoot: workdir }));
-    await emit(mock, "session_start", { reason: "reload" });
+    await emit(mock, "session_start", { reason: "startup" });
+    await workflow.execute("start", { action: "start", workflowId, goal: "session-only workflow" }, undefined, undefined, mock.ctx);
+    await fs.promises.mkdir(path.dirname(legacyWorkplan), { recursive: true });
+    await writeFile(legacyWorkplan, "legacy recovery artifact");
 
-    assert.equal(mock.selections.length, 1);
-    assert.equal(mock.selections[0].title, "Unfinished development workflow");
-    assert.deepEqual(mock.selections[0].options, [
-      `Continue ${workflowId} from red_testing`,
-      `Clear ${workflowId} and start again`,
-    ]);
-    assert.ok(await workflowStateModule.loadState(workflowId), "continue preserves durable state");
-    assert.ok(mock.notifications.some(item => item.message === `Continuing workflow ${workflowId} from red_testing.`));
+    await emit(mock, "session_shutdown", { reason: "quit" });
+    assert.equal(await workflowStateModule.loadState(workflowId), undefined, "session exit removes unfinished workflow state");
+    assert.equal(fs.existsSync(legacyWorkplan), false, "session exit removes a legacy in-progress workplan");
+    assert.equal(mock.subagentRequests.at(-1)?.action, "closeWorkflow", "session exit closes workflow-scoped child sessions");
+    assert.equal(mock.commands.has("workflow-recover"), false, "the recovery command is not registered");
 
-    mock.setSelectAnswer(`Clear ${workflowId} and start again`);
-    await mock.commands.get("workflow-recover").handler(workflowId, mock.ctx);
-    assert.equal(await workflowStateModule.loadState(workflowId), undefined, "clear removes durable state so the ID can be reused");
-    assert.equal(mock.subagentRequests.at(-1)?.action, "closeWorkflow", "clear closes workflow-scoped child sessions first");
-    assert.ok(mock.notifications.some(item => item.message.includes("Submit the development workflow request again to restart.")));
+    await workflowStateModule.saveState(workflowStateModule.createState({ id: workflowId, goal: "orphan", repositoryRoot: workdir }));
+    const replacement = createMockPi();
+    replacement.ctx.cwd = workdir;
+    await emit(replacement, "session_start", { reason: "startup" });
+    assert.equal(replacement.selections.length, 0, "startup never prompts for an unfinished workflow");
+    await assert.rejects(replacement.tools.get("development_workflow").execute("status", { action: "status", workflowId }, undefined, undefined, replacement.ctx), /not active in this foreground session/);
   } finally {
+    setActiveWorkflowIds([]);
     await workflowStateModule.removeState(workflowId).catch(() => undefined);
     await rm(workdir, { recursive: true, force: true });
   }
@@ -186,31 +190,27 @@ test("status uses cloned cached reads, suppresses repeated state loads, and relo
   const originalReadFile = fs.promises.readFile;
   try {
     await workflow.execute("start", { action: "start", workflowId, goal: "cached" }, undefined, undefined, mock.ctx);
-    // Start populates cache; reset it so the first status proves its loader wiring.
-    await emit(mock, "session_shutdown", {});
+    // Hot reload preserves the process-local workflow while rebuilding its cache.
+    await emit(mock, "session_shutdown", { reason: "reload" });
     let reads = 0;
     fs.promises.readFile = async (...args) => {
       if (args[0] === workflowStateModule.statePath(workflowId)) reads++;
       return originalReadFile.apply(fs.promises, args);
     };
+    await emit(mock, "session_start", { reason: "reload" });
     const first = await workflow.execute("status-1", { action: "status", workflowId }, undefined, undefined, mock.ctx);
     first.details.goal = "caller mutation";
     const second = await workflow.execute("status-2", { action: "status", workflowId }, undefined, undefined, mock.ctx);
     assert.equal(second.details.goal, "cached", "returned status values cannot mutate cache");
-    assert.equal(reads, 2, "first status loads its state and list once; repeated status performs no state load");
+    assert.equal(reads, 1, "reload reads active state once; repeated status performs no state load");
 
     const changed = await workflowStateModule.loadState(workflowId);
-    changed.goal = "after-shutdown";
+    changed.goal = "after-reload";
     await workflowStateModule.saveState(changed);
     assert.equal((await workflow.execute("status-stale", { action: "status", workflowId }, undefined, undefined, mock.ctx)).details.goal, "cached");
-    await emit(mock, "session_shutdown", {});
-    await emit(mock, "session_start", {});
-    assert.equal((await workflow.execute("status-reloaded", { action: "status", workflowId }, undefined, undefined, mock.ctx)).details.goal, "after-shutdown", "shutdown clears cached state");
-
-    changed.goal = "after-session-start";
-    await workflowStateModule.saveState(changed);
-    await emit(mock, "session_start", {});
-    assert.equal((await workflow.execute("status-session-reset", { action: "status", workflowId }, undefined, undefined, mock.ctx)).details.goal, "after-session-start", "session replacement clears cached state");
+    await emit(mock, "session_shutdown", { reason: "reload" });
+    await emit(mock, "session_start", { reason: "reload" });
+    assert.equal((await workflow.execute("status-reloaded", { action: "status", workflowId }, undefined, undefined, mock.ctx)).details.goal, "after-reload", "reload clears cached state without recovering another session");
   } finally {
     fs.promises.readFile = originalReadFile;
     await workflowStateModule.removeState(workflowId);
@@ -235,7 +235,7 @@ test("failed durable creation and retirement never leave stale workflow cache en
     };
     await assert.rejects(workflow.execute("failed-start", { action: "start", workflowId: failedId, goal: "must not cache" }, undefined, undefined, mock.ctx), /durable commit failed/);
     fs.promises.rename = originalRename;
-    await assert.rejects(workflow.execute("failed-status", { action: "status", workflowId: failedId }, undefined, undefined, mock.ctx), /Unknown workflow/);
+    await assert.rejects(workflow.execute("failed-status", { action: "status", workflowId: failedId }, undefined, undefined, mock.ctx), /not active in this foreground session/);
 
     await workflow.execute("mutation-start", { action: "start", workflowId: mutationId, goal: "pre-warmed" }, undefined, undefined, mock.ctx);
     assert.equal((await workflow.execute("mutation-warm", { action: "status", workflowId: mutationId }, undefined, undefined, mock.ctx)).details.stage, "red_testing");
@@ -253,7 +253,7 @@ test("failed durable creation and retirement never leave stale workflow cache en
     terminal.stage = "aborted";
     await workflowStateModule.saveState(terminal);
     await workflow.execute("retire", { action: "close", workflowId: retiredId }, undefined, undefined, mock.ctx);
-    await assert.rejects(workflow.execute("retired-status", { action: "status", workflowId: retiredId }, undefined, undefined, mock.ctx), /Unknown workflow/, "successful retirement replaces cached state with a miss");
+    await assert.rejects(workflow.execute("retired-status", { action: "status", workflowId: retiredId }, undefined, undefined, mock.ctx), /not active in this foreground session/, "successful retirement removes session membership");
     assert.equal((await workflow.execute("retired-list", { action: "status" }, undefined, undefined, mock.ctx)).details.some(state => state.id === retiredId), false, "successful retirement invalidates cached list membership");
   } finally {
     fs.promises.rename = originalRename;
@@ -756,25 +756,20 @@ test("terminal notifications are transition-aware for review exhaustion and work
   }
 });
 
-test("terminal notification survives system-of-record failure", async () => {
-  const workdir = await mkdtemp(path.join(os.tmpdir(), "workflow-terminal-sor-failure-"));
+test("in-progress and blocked workflows do not create local workplan documents", async () => {
+  const workdir = await mkdtemp(path.join(os.tmpdir(), "workflow-no-local-workplan-"));
   resetWorkflowMode();
   const mock = createMockPi();
   mock.ctx.cwd = workdir;
   const workflow = mock.tools.get("development_workflow");
-  const workflowId = `terminal-sor-failure-${Date.now()}`;
+  const workflowId = `no-local-workplan-${Date.now()}`;
   try {
-    await workflow.execute("start", { action: "start", workflowId, goal: "notify before SoR" }, undefined, undefined, mock.ctx);
-    // Replace the workplan directory after start. The terminal transaction still
-    // persists in agent runtime, but its subsequent file-backed SoR update fails.
-    await rm(path.join(workdir, ".pi", "workplans"), { recursive: true, force: true });
-    await writeFile(path.join(workdir, ".pi", "workplans"), "not a directory");
-    await assert.rejects(
-      workflow.execute("block", { action: "block", workflowId, reason: "terminal despite SoR failure" }, undefined, undefined, mock.ctx),
-      /System-of-record update failed/,
-    );
-    assert.equal((await workflowStateModule.loadState(workflowId)).stage, "blocked", "terminal transaction remains committed after SoR failure");
-    assert.equal(mock.notifications.filter(n => n.message.includes(workflowId) && n.level === "error").length, 1, "committed terminal transition notifies despite SoR failure");
+    await workflow.execute("start", { action: "start", workflowId, goal: "no recovery document" }, undefined, undefined, mock.ctx);
+    assert.equal(fs.existsSync(path.join(workdir, ".pi", "workplans", `${workflowId}.md`)), false);
+    await workflow.execute("block", { action: "block", workflowId, reason: "blocked without workplan" }, undefined, undefined, mock.ctx);
+    assert.equal((await workflowStateModule.loadState(workflowId)).stage, "blocked");
+    assert.equal(fs.existsSync(path.join(workdir, ".pi", "workplans")), false, "no .pi/workplans directory is created");
+    assert.equal(mock.notifications.filter(n => n.message.includes(workflowId) && n.level === "error").length, 1);
   } finally {
     resetWorkflowMode();
     await workflowStateModule.removeState(workflowId);
@@ -824,9 +819,10 @@ test("stale workflow warnings use valid expirations, deduplicate, reset on reloa
   };
   const now = Date.now();
   const future = new Date(now + 60_000).toISOString();
-  const expired = new Date(now).toISOString();
+  const expiredAtNow = new Date(now).toISOString();
+  const expired = new Date(now - 60_000).toISOString();
   try {
-    assert.equal(workflowStateModule.isWorkflowExpired(expired, now), true, "expiration at now is stale");
+    assert.equal(workflowStateModule.isWorkflowExpired(expiredAtNow, now), true, "expiration at now is stale");
     assert.equal(workflowStateModule.isWorkflowExpired(future, now), false, "future expiration is not stale");
     assert.equal(workflowStateModule.isWorkflowExpired("not-a-timestamp", now), false, "malformed expiration is not stale");
     assert.equal(workflowStateModule.isWorkflowExpired(undefined, now), false, "missing expiration is not stale");
@@ -866,6 +862,7 @@ test("stale workflow warnings use valid expirations, deduplicate, reset on reloa
     headless.ctx.hasUI = false;
     headless.ctx.ui.notify = () => { throw new Error("headless mode must not notify"); };
     await workflowStateModule.saveState({ ...workflowStateModule.createState({ id: ids.headless, goal: "headless", repositoryRoot: workdir }), expiresAt: expired });
+    setActiveWorkflowIds([...activeWorkflowIds(), ids.headless]);
     await emit(headless, "session_start", { reason: "startup" });
     await headless.tools.get("development_workflow").execute("status", { action: "status", workflowId: ids.headless }, undefined, undefined, headless.ctx);
   } finally {

@@ -1,10 +1,10 @@
 # Development Workflow extension
 
-Persistent Pi-native workflow orchestration with a **constitutional core** and a **contextual shell**. The extension/harness deterministically enforces production safety, trust and remote authorization, child/role/file/state integrity, Reviewer read-only behavior, truthful artifacts, and current full-green release evidence. The foreground Orchestrator chooses contextual sequencing, mode, and risk, and records structured audited deviations; prompts never grant authority.
+Session-scoped Pi-native workflow orchestration with a **constitutional core** and a **contextual shell**. The extension/harness deterministically enforces production safety, trust and remote authorization, child/role/file/state integrity, Reviewer read-only behavior, truthful artifacts, and current full-green release evidence. The foreground Orchestrator chooses contextual sequencing, mode, and risk, and records structured audited deviations; prompts never grant authority.
 
 ## Modes, outcomes, and defaults
 
-Workflows select `new`, `adopt_existing`, or `recovery`. State records satisfied and missing outcomes and computes admissible next actions; stage is a resumable compatibility projection, not authority. `new` normally follows red test, implementation, independent review, and reporting. `adopt_existing` uses individually foreground-accepted branch, commits, dirty-tree, approved-plan, tests/prior evidence, implementation, review, report, and optional issue-ownership provenance, then dispatches only missing outcomes. `recovery` lazily resumes durable legacy evidence.
+New workflows select `new` or `adopt_existing`. State records satisfied and missing outcomes and computes admissible next actions; stage is a compatibility projection, not authority. `new` normally follows red test, implementation, independent review, and reporting. `adopt_existing` uses individually foreground-accepted branch, commits, dirty-tree, approved-plan, tests/prior evidence, implementation, review, report, and optional issue-ownership provenance, then dispatches only missing outcomes. The legacy `recovery` value remains schema-compatible for migrated state but is not a cross-session recovery mechanism.
 
 TDD, independent review, and retained tracer bullets are defaults for new work, not authority-granting universal choreography. Only trivial work may depart with an explicit foreground decision. Every outcome-default departure is a structured audited deviation with closed code, reason, decision, risk, actor, timestamp, and evidence; hard invariants have no override.
 
@@ -61,7 +61,7 @@ Role routing follows the Claude-role analogues and is provider-qualified:
 | Reviewer | `openai-codex/gpt-5.6-sol` |
 | Reporter | `openai-codex/gpt-5.6-terra` |
 
-Each model is resolved and authenticated at dispatch with an actionable error. Defaults are Test Writer **low**, Reporter **low**, Implementer **medium**, and Reviewer **medium** thinking; valid explicit overrides remain valid. Only this supported GPT-5.6 pair may be used as an explicit override. A supported override wins and is persisted so resume and review rounds do not drift.
+Each model is resolved and authenticated at dispatch with an actionable error. Defaults are Test Writer **low**, Reporter **low**, Implementer **medium**, and Reviewer **medium** thinking; valid explicit overrides remain valid. Only this supported GPT-5.6 pair may be used as an explicit override. A supported override wins and is persisted so role dispatches and review rounds do not drift during the active session.
 
 ## Parallel worktrees
 
@@ -81,7 +81,7 @@ Trusted `.pi/development-workflow.json` may configure GitHub, GitLab, or Bitbuck
 docs/reports/YYYY-MM-DD-<workflow-id>.md
 ```
 
-Before final reporting, the extension may maintain an operational workplan under `.pi/workplans/`. A posting failure preserves technical state, `reporterResult`, and recovery information.
+The extension does not create in-progress `.pi/workplans/` documents. A posting failure preserves technical state and `reporterResult` for inspection during the active session; final file-backed reports remain under `docs/reports/`.
 
 ## Evidence-sensitive starts
 
@@ -104,17 +104,16 @@ Commands:
 /workflow-disable
 /workflow-status [workflow-id]
 /workflow-diagnostics [workflow-id]
-/workflow-recover [workflow-id]
 /workflow-abort [workflow-id]
 ```
 
 Children are bound to raw `PI_WORKFLOW_ID` and `PI_WORKFLOW_ROLE`. Child prompts allow at most one `bash` call per assistant turn and require a compound command when shell steps belong together; read/grep/find may still be parallel. Test Writer and Implementer can record only their scoped artifacts and advance only their stage. Reviewer can inspect and route review only while reviewing. Reporter can inspect and return exact content only while reporting. Children cannot start, complete, block, abort, close, or access another workflow.
 
-## Recovery and compatibility
+## Session lifecycle and compatibility
 
-State is stored under `~/.pi/agent/runtime/development-workflow/`. Versions 1–4 migrate lazily to schema version 5 without reinterpreting their active stage or old sequence. In particular, active legacy `planning`, `implementing`, or post-implementation `testing` workflows continue their recovery path; only newly created workflows use red-first stages.
+While a foreground session is active, coordination state is stored under `~/.pi/agent/runtime/development-workflow/` so workflow-scoped child processes can share it safely. Versions 1–4 still migrate lazily to schema version 5 without reinterpreting their stage or old sequence; only newly created workflows use red-first stages.
 
-Use workflow `status` and subagent `{ "action": "list", "workflowId": "..." }` to recover stable handles. When startup, reload, or session replacement finds an unfinished workflow, the extension prompts to continue from its exact persisted stage or clear its workflow-scoped child sessions and durable state so it can start again. `/workflow-recover [workflow-id]` reopens that exit hatch on demand. Parent cancellation stops running children but leaves state resumable. Blocked, aborted, disputed-test, posting-failed, and review-escalated workflows retain state and diagnostics. `close` removes only a terminal workflow after coordinated subagent cleanup. Successful completion auto-closes after the foreground result is visible. Orphaned `.pi/workplans/` are recovery artifacts: inspect their workflow ID and durable state before deleting them.
+Workflow identity is process-local and survives extension hot reload only. Startup and replacement sessions do not scan state files, offer continuation, or expose a recovery command. On ordinary session shutdown, unfinished workflows are removed after workflow-scoped child cleanup; hot reload preserves them for the same live process. Final reports and bounded diagnostics remain available. `close` removes a terminal workflow after coordinated child cleanup, and successful completion auto-closes after the foreground result is visible. Existing legacy `.pi/workplans/` files are not used for orchestration and are removed during cleanup of their active workflow; unrelated project plans and reports are left alone.
 
 Diagnostics are append-only, bounded, and redacted under `~/.pi/agent/runtime/development-workflow/diagnostics/`; successful cleanup compacts them to a summary and failed diagnostics retain the 24-hour policy.
 
@@ -129,7 +128,7 @@ env -u PI_SUBAGENT_CHILD -u PI_SUBAGENT_ID -u PI_WORKFLOW_ID -u PI_WORKFLOW_ROLE
   node --test ~/.pi/agent/extensions/development-workflow/*.test.mjs
 
 When a full gate is launched from a workflow child, unset those identity variables **only for the spawned test process** so foreground harness tests are hermetic. Runtime child identity remains fail-closed; never weaken it.
-pi --list-models -e ~/.pi/agent/extensions/subagent/index.ts
+pi --list-models -e ~/.pi/agent/extensions/subagents/index.ts
 pi --list-models -e ~/.pi/agent/extensions/development-workflow/index.ts
 ```
 

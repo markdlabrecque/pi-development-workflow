@@ -15,8 +15,8 @@ const jiti = piRequire("jiti")(import.meta.url, { moduleCache: false, alias: { "
 
 test("round-one regressions have enforceable production hooks", () => {
   const workflow = source("index.ts");
-  const guard = source("../subagent/child-guard.ts");
-  const subagent = source("../subagent/index.ts");
+  const guard = source("../subagents/child-guard.ts");
+  const subagent = source("../subagents/index.ts");
   assert.match(guard, /turn_start/);
   assert.match(guard, /usedBashThisTurn/);
   assert.match(workflow, /--porcelain=v1", "-z", "--untracked-files=all/);
@@ -42,7 +42,7 @@ test("a pre-field red-first fixing state derives an evidence floor", async () =>
 });
 
 test("exceptional timing charges prior idle only before an unpersisted attempt", async () => {
-  const { settleExceptionalWorkflowTiming } = await jiti.import(path.join(here, "../subagent/index.ts"));
+  const { settleExceptionalWorkflowTiming } = await jiti.import(path.join(here, "../subagents/index.ts"));
   const prior = { activeRunMs: 10, idleWaitingMs: 20, lastEndedAt: new Date(1_000).toISOString() };
   assert.equal(settleExceptionalWorkflowTiming(prior, 2_000, 2_300, false), true);
   assert.deepEqual(prior, { activeRunMs: 310, idleWaitingMs: 1_020, lastEndedAt: new Date(1_000).toISOString() });

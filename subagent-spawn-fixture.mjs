@@ -30,7 +30,7 @@ const jiti = require("jiti")(import.meta.url, { moduleCache: false, alias: {
   "@earendil-works/pi-ai": path.join(piRoot, "node_modules", "@earendil-works", "pi-ai", "dist", "compat.js"),
   "@earendil-works/pi-tui": path.join(piRoot, "node_modules", "@earendil-works", "pi-tui", "dist", "index.js"), typebox: require.resolve("typebox"),
 } });
-const extensionPath = fileURLToPath(new URL("../subagent/index.ts", import.meta.url));
+const extensionPath = fileURLToPath(new URL("../subagents/index.ts", import.meta.url));
 const loaded = await jiti.import(extensionPath, { default: true });
 const extension = loaded.default ?? loaded;
 const tools = new Map();

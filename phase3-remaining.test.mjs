@@ -24,6 +24,7 @@ const directory = path.dirname(fileURLToPath(new URL("./index.ts", import.meta.u
 const state = await jiti.import(path.join(directory, "workflow-state.ts"));
 const compaction = await jiti.import(path.join(directory, "compaction-state.ts"));
 const records = await jiti.import(path.join(directory, "system-of-record.ts"));
+const { setActiveWorkflowIds } = await jiti.import(path.join(directory, "thread-mode.ts"));
 const indexModule = await jiti.import(path.join(directory, "index.ts"), { default: true });
 const developmentWorkflow = indexModule.default ?? indexModule;
 
@@ -67,6 +68,7 @@ test("compaction hook preserves Pi result semantics, auth, split turns, and repe
   await state.saveState(activeWorkflow);
   activeWorkflow.updatedAt = "9999-12-31T23:59:59.999Z";
   await writeFile(state.statePath(workflowId), JSON.stringify(activeWorkflow));
+  setActiveWorkflowIds([workflowId]);
   const handlers = new Map();
   const pi = { on(name, handler) { const entries = handlers.get(name) ?? []; entries.push(handler); handlers.set(name, entries); }, registerTool() {}, registerCommand() {}, getActiveTools() { return []; }, setActiveTools() {}, events: { emit() {} } };
   developmentWorkflow(pi);
@@ -116,6 +118,7 @@ test("compaction hook preserves Pi result semantics, auth, split turns, and repe
     assert.equal(calls.length, 4);
     assert.equal(repeated.compaction.summary.split(compaction.WORKFLOW_SNAPSHOT_START).length - 1, 1, "repeated hook compactions replace, rather than accumulate, workflow state");
   } finally {
+    setActiveWorkflowIds([]);
     registration.unregister();
     await state.removeState(workflowId);
   }
