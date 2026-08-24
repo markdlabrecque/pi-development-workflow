@@ -39,7 +39,7 @@ async function resolveQualifiedWorkflowModel(ctx: ExtensionContext, qualified: s
 /** Resolve and authenticate the high-judgment foreground Orchestrator model. */
 export async function resolveWorkflowModel(ctx: ExtensionContext) { return resolveQualifiedWorkflowModel(ctx, WORKFLOW_MODEL); }
 const Actions = ["start", "status", "advance", "record", "routeReview", "report", "complete", "block", "abort", "close", "override", "resolveEscalation", "replaceAttempt"] as const;
-const Stages = ["planning", "red_testing", "implementing", "testing", "reviewing", "fixing", "reporting", "completed", "blocked", "aborted"] as const;
+const Stages = ["red_testing", "implementing", "testing", "reviewing", "fixing", "reporting", "completed", "blocked", "aborted"] as const;
 const Finding = Type.Object({ category: StringEnum(["must_fix", "quick_fix", "follow_up", "advisory", "approved"] as const), title: Type.String(), detail: Type.Optional(Type.String()), file: Type.Optional(Type.String()), line: Type.Optional(Type.Number()) });
 const InventoryArtifact = Type.Object({ artifact: Type.String(), evidence: Type.String(), acceptedBy: Type.String(), acceptedAt: Type.String() });
 const AttemptFailure = Type.Object({ reason: Type.String(), exitCode: Type.Optional(Type.Number()), durationMs: Type.Optional(Type.Number()), usage: Type.Optional(Type.Object({ input: Type.Number(), output: Type.Number(), turns: Type.Optional(Type.Number()) })) });
@@ -102,7 +102,7 @@ function workflowChild(): WorkflowChild | undefined {
   if (!isChildSession()) return undefined;
   const workflowId = process.env.PI_WORKFLOW_ID;
   const role = process.env.PI_WORKFLOW_ROLE;
-  if (!workflowId || !role || !["planner", "implementer", "test-writer", "reviewer", "reporter"].includes(role)) return undefined;
+  if (!workflowId || !role || !["implementer", "test-writer", "reviewer", "reporter"].includes(role)) return undefined;
   return { workflowId, role: role as RoleName };
 }
 function isWorkflowChildSession(): boolean { return workflowChild() !== undefined; }
@@ -113,19 +113,14 @@ function malformedWorkflowChildError(): string | undefined {
 // workflow role; it is a tool-call boundary, not a defense against a child deliberately
 // forging its environment through an arbitrary shell.
 const CHILD_ACTIONS: Record<RoleName, readonly (typeof Actions)[number][]> = {
-  planner: ["status", "record", "advance"],
   implementer: ["status", "record", "advance"],
   "test-writer": ["status", "record", "advance"],
   reviewer: ["status", "routeReview"],
   reporter: ["status", "report"],
 };
-const CHILD_RECORD_FIELDS: Record<Extract<RoleName, "planner" | "implementer" | "test-writer">, readonly string[]> = {
-  planner: ["plan"],
+const CHILD_RECORD_FIELDS: Record<Extract<RoleName, "implementer" | "test-writer">, readonly string[]> = {
   implementer: ["implementationSummary", "files", "testCommand", "testPassed", "testOutput", "evidenceKind"],
   "test-writer": ["files", "testCommand", "testPassed", "testOutput", "evidenceKind", "expectedFailureReason"],
-};
-const CHILD_ADVANCES: Partial<Record<RoleName, { from: readonly Stage[]; to: Stage }>> = {
-  planner: { from: ["planning"], to: "implementing" },
 };
 const RECORD_MUTABLE_FIELDS = ["plan", "implementationSummary", "files", "testCommand", "testPassed", "testOutput", "evidenceKind", "expectedFailureReason"] as const;
 const RECORD_BASE_FIELDS = ["action", "workflowId", "agentId"] as const;
@@ -152,16 +147,13 @@ function childWorkflowAccessError(params: { action?: string; workflowId?: string
     if (unexpected) return `The reporter workflow child may not include ${unexpected} in report actions.`;
   }
   if (!state) return undefined;
-  if (child.role === "planner" && (state.stage !== "planning" || state.planProvenance !== undefined)) {
-    return "Planner access is restricted to pre-existing legacy workflows still in planning.";
-  }
   if (params.action === "advance") {
     const legacy = !state.stageSequence.includes("red_testing");
     const allowed = child.role === "implementer"
       ? (state.stage === "fixing" && params.stage === "reporting" && Boolean(state.review.postCapFix)) || (["implementing", "fixing"].includes(state.stage) && params.stage === (legacy ? "testing" : "reviewing"))
       : child.role === "test-writer"
         ? (legacy ? state.stage === "testing" && params.stage === "reviewing" : state.stage === "red_testing" && params.stage === "implementing")
-        : Boolean(CHILD_ADVANCES[child.role] && params.stage === CHILD_ADVANCES[child.role]!.to && CHILD_ADVANCES[child.role]!.from.includes(state.stage));
+        : false;
     if (!allowed) return `The ${child.role} workflow child may not advance ${state.stage} to ${String(params.stage)}.`;
   }
   if (params.action === "routeReview" && state.stage !== "reviewing") return "The reviewer workflow child may route review only while reviewing.";
@@ -562,7 +554,7 @@ export default function (pi: ExtensionAPI) {
         throw new Error(`Unable to resume development workflow ${currentId}: ${error.message}`);
       }
     }
-    return { systemPrompt: `${event.systemPrompt}\n\nYou are the development-workflow Orchestrator. Agent profiles and workflow roles are different namespaces. Workflow lifecycle dispatches accept only these exact agentId values: planner, implementer, test-writer, reviewer, reporter. Do not invent or semantically infer workflow roles. Auxiliary profiles such as researcher remain available through ordinary subagent dispatch, for example { agent: "researcher", task: "Investigate ..." }, without lifecycle, workflowId, or agentId. Route implementation through workflow-scoped subagents; do not directly perform normal implementation edits. Use stable workflowId and valid role agentId handles. Never ask a child to re-plan the entire change. Review-cycle limits escalate recoverably; never automatically block, defer, or approve findings.${planContext}` };
+    return { systemPrompt: `${event.systemPrompt}\n\nYou are the development-workflow Orchestrator. Agent profiles and workflow roles are different namespaces. Workflow lifecycle dispatches accept only these exact agentId values: implementer, test-writer, reviewer, reporter. Do not invent or semantically infer workflow roles. Auxiliary profiles such as researcher remain available through ordinary subagent dispatch, for example { agent: "researcher", task: "Investigate ..." }, without lifecycle, workflowId, or agentId. Route implementation through workflow-scoped subagents; do not directly perform normal implementation edits. Use stable workflowId and valid role agentId handles. Never ask a child to re-plan the entire change. Review-cycle limits escalate recoverably; never automatically block, defer, or approve findings.${planContext}` };
   });
 
   // Child policy: at most one bash call per assistant turn; a sibling bash is blocked immediately with combine commands guidance instead of waiting on the mutation mutex.

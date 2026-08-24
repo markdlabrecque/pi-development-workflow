@@ -41,7 +41,7 @@ Fresh physical attempts receive one compact artifact bundle, not conversation hi
 
 ### Profiles versus workflow roles
 
-Agent profile names and workflow role identifiers are separate namespaces. A dispatch with `lifecycle: "workflow"` accepts only these exact `agentId` values: `planner`, `implementer`, `test-writer`, `reviewer`, and `reporter`. The extension does not normalize spelling variants such as `test_writer` or infer semantic aliases such as `auditor -> reviewer`; invented identifiers are rejected with the valid list.
+Agent profile names and workflow role identifiers are separate namespaces. A dispatch with `lifecycle: "workflow"` accepts only these exact `agentId` values: `implementer`, `test-writer`, `reviewer`, and `reporter`. The extension does not normalize spelling variants such as `test_writer` or infer semantic aliases such as `auditor -> reviewer`; invented identifiers are rejected with the valid list.
 
 Auxiliary profiles remain available outside workflow lifecycle. For example, use `{ "agent": "researcher", "task": "Investigate ..." }` without `lifecycle`, `workflowId`, or `agentId`. Do not represent a researcher or auditor profile as an invented privileged workflow role.
 
@@ -55,7 +55,7 @@ Role routing follows the Claude-role analogues and is provider-qualified:
 
 | Role | Model |
 |---|---|
-| Foreground Orchestrator / legacy Planner | `openai-codex/gpt-5.6-sol` |
+| Foreground Orchestrator | `openai-codex/gpt-5.6-sol` |
 | Test Writer | `openai-codex/gpt-5.6-terra` |
 | Implementer | `openai-codex/gpt-5.6-terra` |
 | Reviewer | `openai-codex/gpt-5.6-sol` |

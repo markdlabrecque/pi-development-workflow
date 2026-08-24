@@ -22,7 +22,6 @@ function stageInstruction(stage: WorkflowState["stage"]): string {
     case "reviewing": return "Send Reviewer the approved spec, red evidence, implementation diff, green evidence, and a named suspected weakness; require the full project gate first.";
     case "fixing": return "Send only the concrete review findings and relevant approved scope back to the stable logical Implementer role; physical attempts are replaceable only by foreground authorization after infrastructure failure.";
     case "reporting": return "Ask Reporter to summarize execution against the approved plan; do not ask it to re-plan.";
-    case "planning": return "This is a legacy planning workflow. Resume its existing Planner session without replacing its recorded scope.";
     default: return "Inspect the durable workflow state; do not create or broaden a plan.";
   }
 }
@@ -50,7 +49,7 @@ export function renderOrchestratorPlanContext(state: WorkflowState): string {
     state.mode === "adopt_existing" ? `Adopted-existing workflow: dispatch only the first missing outcome (${state.missingOutcomes[0] ?? "none"}) using the admissible actions above; do not synthesize targeted-red or Test Writer work when accepted tests provenance satisfies it.` : stageInstruction(state.stage),
     "Delegate execution details, not whole-change re-planning. Preserve stable logical Implementer authority across fix rounds; physical attempts are replaceable only with foreground authorization after infrastructure failure. Use fresh stage contexts and pass artifacts rather than conversation history. Never use a fork or sub-orchestrator as a pipeline stage.",
     "Before dispatch, honor the persisted branch/dirty-tree/worktree snapshot and any batch file ownership/shared contracts. Parallelize only when the user explicitly requested it.",
-    "Agent profiles are not workflow roles. Workflow lifecycle agentId must be exactly one of: planner, implementer, test-writer, reviewer, reporter. Never invent or semantically infer a role identifier.",
+    "Agent profiles are not workflow roles. Workflow lifecycle agentId must be exactly one of: implementer, test-writer, reviewer, reporter. Never invent or semantically infer a role identifier.",
     "Auxiliary profiles such as researcher use ordinary subagent dispatch, for example { agent: \"researcher\", task: \"Investigate ...\" }, with no lifecycle, workflowId, or agentId.",
     "",
     `Approved plan${bounded.truncated ? ` (truncated to ${MAX_PLAN_PROMPT_BYTES} bytes for prompt safety)` : ""}:`,

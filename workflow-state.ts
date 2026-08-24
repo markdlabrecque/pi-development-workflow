@@ -215,8 +215,9 @@ function escalation(value: unknown): ReviewCapEscalation | undefined {
 
 /**
  * Upgrade persisted state without mutating the parsed input. Versions one through
- * three retain their active stage and sequence; legacy workflows are never silently
- * reinterpreted as red-first. Migration is lazy until the next explicit save.
+ * four retain non-planning active stages and legacy testing recovery, but planning is
+ * removed from the live sequence. Active planning states require a fresh workflow.
+ * Migration is lazy until the next explicit save.
  */
 export function migrateState(raw: unknown): WorkflowState {
   const source = record(raw, "root");
@@ -241,6 +242,8 @@ export function migrateState(raw: unknown): WorkflowState {
         : {}),
     }
     : version === 2 || version === 3 || version === 4 ? { ...source, ...legacyV5Fields, version: CURRENT_STATE_VERSION } : { ...source, ...currentV5Defaults };
+  if (candidate.stage === "planning") throw new Error("Persisted workflow is still in planning; restart the workflow to continue without Planner.");
+  if (Array.isArray(candidate.stageSequence)) candidate.stageSequence = candidate.stageSequence.filter(entry => entry !== "planning");
   if (candidate.version !== CURRENT_STATE_VERSION) throw new Error(`Unsupported workflow state version ${String(candidate.version)}`);
 
   const reviewSource = record(candidate.review, "review");
@@ -487,12 +490,12 @@ export function replaceRoleAttempt(state: WorkflowState, input: RoleAttemptRepla
   state.roleAttemptReplacements.push(normalized);
   return state;
 }
-const allowed: Record<Stage, Stage[]> = {
-  planning: ["implementing", "blocked", "aborted"], red_testing: ["implementing", "blocked", "aborted"], implementing: ["reviewing", "testing", "blocked", "aborted"], testing: ["reviewing", "fixing", "blocked", "aborted"],
+const allowed: Partial<Record<Stage, Stage[]>> = {
+  red_testing: ["implementing", "blocked", "aborted"], implementing: ["reviewing", "testing", "blocked", "aborted"], testing: ["reviewing", "fixing", "blocked", "aborted"],
   reviewing: ["fixing", "reporting", "blocked", "aborted"], fixing: ["reviewing", "testing", "reporting", "blocked", "aborted"], reporting: ["completed", "blocked", "aborted"],
-  completed: [], blocked: ["planning", "red_testing", "implementing", "testing", "reviewing", "fixing", "reporting", "aborted"], aborted: [] };
+  completed: [], blocked: ["red_testing", "implementing", "testing", "reviewing", "fixing", "reporting", "aborted"], aborted: [] };
 export function transition(state: WorkflowState, next: Stage, note?: string): void {
   if (state.review.escalation && next === "completed") throw new Error("Cannot complete while a review-cap escalation is unresolved");
-  if (!allowed[state.stage].includes(next)) throw new Error(`Invalid workflow transition: ${state.stage} -> ${next}`);
+  if (!allowed[state.stage]?.includes(next)) throw new Error(`Invalid workflow transition: ${state.stage} -> ${next}`);
   state.stage = next; state.history.push({ stage: next, at: new Date().toISOString(), note });
 }

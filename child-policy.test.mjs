@@ -40,16 +40,16 @@ async function emit(mock, name, event) { let result; for (const handler of mock.
 test("workflow child policy matrix enforces role actions, exact records, and stage transitions", async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "workflow-child-policy-"));
   const workflowId = `workflow-child-policy-${Date.now()}`;
-  const prior = process.env.PI_SUBAGENT_ID, priorWorkflowId = process.env.PI_WORKFLOW_ID, priorWorkflowRole = process.env.PI_WORKFLOW_ROLE;
-  delete process.env.PI_SUBAGENT_ID; delete process.env.PI_WORKFLOW_ID; delete process.env.PI_WORKFLOW_ROLE; setWorkflowModeEnabled(true);
+  const prior = process.env.PI_SUBAGENT_ID, priorWorkflowId = process.env.PI_WORKFLOW_ID, priorWorkflowRole = process.env.PI_WORKFLOW_ROLE, priorChild = process.env.PI_SUBAGENT_CHILD;
+  delete process.env.PI_SUBAGENT_ID; delete process.env.PI_SUBAGENT_CHILD; delete process.env.PI_WORKFLOW_ID; delete process.env.PI_WORKFLOW_ROLE; setWorkflowModeEnabled(true);
   const mock = mockPi(cwd); const workflow = mock.tools.get("development_workflow");
   try {
     const legacy = state.createState({ id: workflowId, goal: "child policy", repositoryRoot: cwd });
-    legacy.stage = "planning"; legacy.stageSequence = [...state.LEGACY_STAGE_SEQUENCE]; legacy.history = [{ stage: "planning", at: legacy.createdAt }];
+    legacy.stage = "implementing"; legacy.stageSequence = [...state.LEGACY_STAGE_SEQUENCE.filter(stage => stage !== "planning")]; legacy.history = [{ stage: "planning", at: legacy.createdAt }, { stage: "implementing", at: legacy.updatedAt }];
     await state.saveState(legacy);
-    const allowed = { planner: ["status", "record", "advance"], implementer: ["status", "record", "advance"], "test-writer": ["status", "record", "advance"], reviewer: ["status", "routeReview"], reporter: ["status", "report"] };
+    const allowed = { implementer: ["status", "record", "advance"], "test-writer": ["status", "record", "advance"], reviewer: ["status", "routeReview"], reporter: ["status", "report"] };
     const actions = ["start", "status", "advance", "record", "routeReview", "report", "complete", "block", "abort", "close", "override", "resolveEscalation"];
-    const recordPayload = { planner: { plan: "x" }, implementer: { implementationSummary: "x" }, "test-writer": { testCommand: "node --test" }, reviewer: {}, reporter: {} };
+    const recordPayload = { implementer: { implementationSummary: "x" }, "test-writer": { testCommand: "node --test" }, reviewer: {}, reporter: {} };
     for (const [role, permitted] of Object.entries(allowed)) {
       process.env.PI_SUBAGENT_ID = `workflow-${workflowId}:${role}`;
       process.env.PI_WORKFLOW_ID = workflowId; process.env.PI_WORKFLOW_ROLE = role;
@@ -61,11 +61,7 @@ test("workflow child policy matrix enforces role actions, exact records, and sta
     }
 
     process.env.PI_SUBAGENT_ID = `workflow-${workflowId}:planner`; process.env.PI_WORKFLOW_ID = workflowId; process.env.PI_WORKFLOW_ROLE = "planner";
-    await assert.rejects(workflow.execute("empty", { action: "record", workflowId, agentId: "planner" }, undefined, undefined, mock.ctx), /at least one/);
-    await assert.rejects(workflow.execute("extra", { action: "record", workflowId, agentId: "planner", plan: "p", reason: "not a record field" }, undefined, undefined, mock.ctx), /may not include reason/);
-    await workflow.execute("plan", { action: "record", workflowId, agentId: "planner", plan: "p" }, undefined, undefined, mock.ctx);
-    await assert.rejects(workflow.execute("bad planner advance", { action: "advance", workflowId, stage: "testing" }, undefined, undefined, mock.ctx), /may not advance/);
-    await workflow.execute("planner advance", { action: "advance", workflowId, stage: "implementing" }, undefined, undefined, mock.ctx);
+    await assert.rejects(workflow.execute("removed planner", { action: "status", workflowId }, undefined, undefined, mock.ctx), /Malformed workflow child identity|Invalid workflow role|Unknown workflow role/);
 
     process.env.PI_SUBAGENT_ID = `workflow-${workflowId}:implementer`; process.env.PI_WORKFLOW_ROLE = "implementer";
     await workflow.execute("implementation", { action: "record", workflowId, agentId: "implementer", implementationSummary: "done", files: ["src/a.ts"] }, undefined, undefined, mock.ctx);
@@ -96,6 +92,7 @@ test("workflow child policy matrix enforces role actions, exact records, and sta
     if (prior === undefined) delete process.env.PI_SUBAGENT_ID; else process.env.PI_SUBAGENT_ID = prior;
     if (priorWorkflowId === undefined) delete process.env.PI_WORKFLOW_ID; else process.env.PI_WORKFLOW_ID = priorWorkflowId;
     if (priorWorkflowRole === undefined) delete process.env.PI_WORKFLOW_ROLE; else process.env.PI_WORKFLOW_ROLE = priorWorkflowRole;
+    if (priorChild === undefined) delete process.env.PI_SUBAGENT_CHILD; else process.env.PI_SUBAGENT_CHILD = priorChild;
     setWorkflowModeEnabled(false);
     await state.removeState(workflowId);
     await rm(cwd, { recursive: true, force: true });

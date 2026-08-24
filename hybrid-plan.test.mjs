@@ -47,11 +47,10 @@ test("plan ingestion enforces repository bounds, regular files, size, and digest
   } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
 });
 
-test("version two planning workflows migrate without silent stage rewrite", () => {
+test("active version two planning workflows fail with restart guidance", () => {
   const legacy = stateModule.createState({ id: "legacy-v2", goal: "resume", repositoryRoot: process.cwd() });
   legacy.version = 2; legacy.stage = "planning"; legacy.history = [{ stage: "planning", at: legacy.createdAt }]; legacy.stageSequence = [...stateModule.LEGACY_STAGE_SEQUENCE];
-  const migrated = stateModule.migrateState(legacy);
-  assert.equal(migrated.version, 5); assert.equal(migrated.stage, "planning"); assert.deepEqual(migrated.stageSequence, [...stateModule.LEGACY_STAGE_SEQUENCE]);
+  assert.throws(() => stateModule.migrateState(legacy), /planning.*restart|restart.*planning/i);
 });
 
 test("new state and bounded Orchestrator prompt are planner-free and retain provenance", () => {
@@ -62,7 +61,7 @@ test("new state and bounded Orchestrator prompt are planner-free and retain prov
   const prompt = promptModule.renderOrchestratorPlanContext(state);
   assert.match(prompt, /truncated/); assert.match(prompt, /a{64}/); assert.match(prompt, /red-test command/);
   assert.match(prompt, /Agent profiles are not workflow roles/);
-  assert.match(prompt, /planner, implementer, test-writer, reviewer, reporter/);
+  assert.match(prompt, /implementer, test-writer, reviewer, reporter/);
   assert.match(prompt, /\{ agent: "researcher", task: "Investigate \.\.\." \}/);
   assert.ok(Buffer.byteLength(prompt) < promptModule.MAX_PLAN_PROMPT_BYTES + 2000);
 });
@@ -90,7 +89,7 @@ test("workflow dispatch rejects invented roles while ordinary researcher profile
   for (const agentId of ["harness-auditor", "wayfinder-auditor", "auditor", "test_writer"]) {
     await assert.rejects(dispatch({ toolName: "subagent", toolCallId: `invalid-${agentId}`, input: { lifecycle: "workflow", workflowId: "workflow-1", agentId, agent: "researcher", task: "audit" } }, { modelRegistry: registry() }), error => {
       assert.match(error.message, new RegExp(`Invalid workflow agentId "${agentId}"`));
-      assert.match(error.message, /planner, implementer, test-writer, reviewer, reporter/);
+      assert.match(error.message, /implementer, test-writer, reviewer, reporter/);
       assert.match(error.message, /\{ agent: "researcher", task: "Investigate \.\.\." \}/);
       assert.match(error.message, /omit lifecycle, workflowId, and agentId/);
       return true;

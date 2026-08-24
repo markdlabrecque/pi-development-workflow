@@ -28,15 +28,15 @@ test("workflow regression: registry-shaped child identity is raw-bound and stale
   const workflowId = "customer/a:b/c";
   try {
     const legacy = state.createState({ id: workflowId, goal: "identity", repositoryRoot: cwd });
-    legacy.stage = "planning"; legacy.stageSequence = [...state.LEGACY_STAGE_SEQUENCE]; legacy.history = [{ stage: "planning", at: legacy.createdAt }];
+    legacy.stage = "implementing"; legacy.stageSequence = [...state.LEGACY_STAGE_SEQUENCE.filter(stage => stage !== "planning")]; legacy.history = [{ stage: "planning", at: legacy.createdAt }, { stage: "implementing", at: legacy.updatedAt }];
     await state.saveState(legacy);
     // This is the actual subagent registry form: the workflow part is sanitized and
     // therefore cannot be decoded. The separate raw fields must be authoritative.
-    const output = await child("workflow-child-fixture.mjs", [workflowId], {
-      PI_SUBAGENT_CHILD: "1", PI_SUBAGENT_ID: "customer_a_b_c:planner",
-      PI_WORKFLOW_ID: workflowId, PI_WORKFLOW_ROLE: "planner",
+    const output = await child("workflow-child-fixture.mjs", [workflowId, "advance-testing"], {
+      PI_SUBAGENT_CHILD: "1", PI_SUBAGENT_ID: "customer_a_b_c:implementer",
+      PI_WORKFLOW_ID: workflowId, PI_WORKFLOW_ROLE: "implementer",
     });
-    assert.equal(JSON.parse(output).stage, "implementing");
+    assert.equal(JSON.parse(output).stage, "testing");
 
     // Exercise the registered subagent tool's real spawn path, rather than injecting
     // identity directly into the workflow-tool fixture.
