@@ -113,7 +113,7 @@ The loader promise is deliberately not cached: a rejected loader must not poison
   },
   "reporter-audit-fidelity": {
     name: "reporter-audit-fidelity", role: "reporter", thinking: "low",
-    prompt: `Act as Reporter and produce the exact final Markdown system-of-record post for this audit fidelity task. Preserve every fact, caveat, follow-up, accepted deviation, unresolved risk, and the posting failure; do not claim a successful post.`,
+    prompt: `Act as Reporter and produce the exact final Markdown system-of-record post for this audit fidelity task. Use this fixed template and these exact headings (do not omit or rename them): # Report, ## Outcome, ## Changed files, ## Verification, ### Red evidence, ### Green evidence, ## Review, ## Follow-up, ## Accepted deviation, ## Unresolved risk, ## Posting. Put each fact in its named section. Preserve every fact, caveat, follow-up, accepted deviation, unresolved risk, and the posting failure; do not claim a successful post.`,
     promptBundle: `
 Goal: Add atomic reservation behavior without changing the public API.
 Changed files: src/inventory.mjs and test/inventory.test.mjs.

@@ -15,6 +15,7 @@ test("hard role scorers accept equivalent structured findings and faithful prose
       {
         fixture: "reviewer-tenant-cache",
         model: "structured-reviewer",
+        exitStatus: 0,
         response: JSON.stringify({ findings: [
           { classification: "must_fix", severity: "critical", location: "src/tenant-cache.mjs:11", explanation: "The cache key omits the tenant and leaks values across tenants." },
           { severity: "must_fix", location: "src/tenant-cache.mjs: `now <= hit.expiresAt`", explanation: "The expiration boundary serves an entry when the timestamps are equal." },
@@ -23,7 +24,18 @@ test("hard role scorers accept equivalent structured findings and faithful prose
       {
         fixture: "reporter-audit-fidelity",
         model: "faithful-reporter",
-        response: `# Atomic reservation\nGoal: preserve the public API.\nImplementation: src/inventory.mjs and test/inventory.test.mjs.\nRed: node --test test/inventory.test.mjs failed. Green: node --test *.test.mjs passed.\nReview approved after round 2.\nAccepted deviation DEV-17. Reason: legacy callers. Risk: return-shape ambiguity. Evidence: contract test.\nFollow-up: performance telemetry.\nUnresolved risk: concurrent callers.\nThe system-of-record transport timed out. Technical completion remains, and posting must be retried.`,
+        exitStatus: 0,
+        response: `# Report\n## Outcome\nAtomic reservation without changing the public API.\n## Changed files\nsrc/inventory.mjs and test/inventory.test.mjs.\n## Verification\n### Red evidence\nRed: node --test test/inventory.test.mjs failed.\n### Green evidence\nGreen: node --test *.test.mjs passed.\n## Review\nApproved after round 2.\n## Follow-up\nFollow-up: performance telemetry.\n## Accepted deviation\nAccepted deviation DEV-17. Reason: legacy callers. Risk: return-shape ambiguity. Evidence: contract test.\n## Unresolved risk\nUnresolved risk: concurrent callers.\n## Posting\nThe system-of-record transport timed out. Technical completion remains, and posting must be retried.`,
+      },
+      {
+        fixture: "reviewer-tenant-cache",
+        model: "noisy-reviewer",
+        exitStatus: 0,
+        response: JSON.stringify({ findings: [
+          { severity: "must_fix", location: "src/tenant-cache.mjs", explanation: "The tenant is absent from the cache key." },
+          { severity: "must_fix", location: "src/tenant-cache.mjs", explanation: "The expiration boundary remains valid." },
+          { classification: "quick_fix", location: "src/tenant-cache.mjs", explanation: "The rejected loader should be cached." },
+        ] }),
       },
     ];
     await writeFile(input, `${records.map(JSON.stringify).join("\n")}\n`);
@@ -43,6 +55,9 @@ test("hard role scorers accept equivalent structured findings and faithful prose
     assert.equal(score.results[1].matchedFactCount, 9);
     assert.equal(score.results[1].contradictionCount, 0);
     assert.equal(score.results[1].matchesOracle, true);
+    assert.equal(score.results[2].matchedFindingCount, 2);
+    assert.equal(score.results[2].falsePositiveCount, 1);
+    assert.equal(score.results[2].matchesOracle, false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
