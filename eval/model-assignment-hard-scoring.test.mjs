@@ -17,8 +17,8 @@ test("hard role scorers accept equivalent structured findings and faithful prose
         model: "structured-reviewer",
         exitStatus: 0,
         response: JSON.stringify({ findings: [
-          { classification: "must_fix", severity: "critical", location: "src/tenant-cache.mjs:11", explanation: "The cache key omits the tenant and leaks values across tenants." },
-          { severity: "must_fix", location: "src/tenant-cache.mjs: `now <= hit.expiresAt`", explanation: "The entry is served exactly at expiration." },
+          { severity: "must_fix", location: "src/tenant-cache.mjs:9", evidence: "const cacheKey = key", cause: "The cache key omits the tenant key dimension.", impact: "Values can cross tenant boundaries.", explanation: "Include tenantId in cacheKey." },
+          { severity: "must_fix", location: "src/tenant-cache.mjs:12", evidence: "now <= hit.expiresAt", cause: "The expiration boundary uses now <= expiresAt.", impact: "An expired entry is served at exact expiry.", explanation: "Treat equality as stale." },
         ] }),
       },
       {
@@ -32,9 +32,9 @@ test("hard role scorers accept equivalent structured findings and faithful prose
         model: "noisy-reviewer",
         exitStatus: 0,
         response: JSON.stringify({ findings: [
-          { severity: "must_fix", location: "src/tenant-cache.mjs", explanation: "The tenant is absent from the cache key." },
-          { severity: "must_fix", location: "src/tenant-cache.mjs", explanation: "The expiration boundary remains valid." },
-          { classification: "quick_fix", location: "src/tenant-cache.mjs", explanation: "The rejected loader should be cached." },
+          { severity: "must_fix", location: "src/tenant-cache.mjs:9", evidence: "const cacheKey = key", cause: "The tenant is absent from the cache key.", impact: "Values cross tenant boundaries.", explanation: "Use a composite key." },
+          { severity: "must_fix", location: "src/tenant-cache.mjs:12", evidence: "now <= hit.expiresAt", cause: "The expiration boundary uses equality as fresh.", impact: "An expired entry is served.", explanation: "Use a strict freshness comparison." },
+          { severity: "quick_fix", location: "src/tenant-cache.mjs:14", cause: "The loader promise is not cached.", impact: "Rejected loads can retry.", explanation: "Cache the loader promise." },
         ] }),
       },
       {
@@ -42,8 +42,8 @@ test("hard role scorers accept equivalent structured findings and faithful prose
         model: "contradictory-reviewer",
         exitStatus: 0,
         response: JSON.stringify({ findings: [
-          { severity: "must_fix", location: "src/tenant-cache.mjs", explanation: "The tenant is absent from the cache key." },
-          { severity: "must_fix", location: "src/tenant-cache.mjs", explanation: "The exact expiration behavior is correct." },
+          { severity: "must_fix", location: "src/tenant-cache.mjs:9", evidence: "const cacheKey = key", cause: "The tenant is absent from the cache key.", impact: "Values cross tenant boundaries.", explanation: "Use a composite key." },
+          { severity: "must_fix", location: "src/tenant-cache.mjs:12", evidence: "now <= hit.expiresAt", cause: "The expiration boundary is exact and behavior is correct.", impact: "An expired entry is served.", explanation: "No change is needed." },
         ] }),
       },
       {
@@ -51,8 +51,8 @@ test("hard role scorers accept equivalent structured findings and faithful prose
         model: "opposite-reviewer",
         exitStatus: 0,
         response: JSON.stringify({ findings: [
-          { severity: "must_fix", location: "src/tenant-cache.mjs", explanation: "The tenant is absent from the cache key." },
-          { severity: "must_fix", location: "src/tenant-cache.mjs", explanation: "The entry is correctly served at exact expiration and is fresh." },
+          { severity: "must_fix", location: "src/tenant-cache.mjs:9", evidence: "const cacheKey = key", cause: "The tenant is absent from the cache key.", impact: "Values cross tenant boundaries.", explanation: "Use a composite key." },
+          { severity: "must_fix", location: "src/tenant-cache.mjs:12", evidence: "now <= hit.expiresAt", cause: "The expiration boundary uses equality and is correctly served.", impact: "An expired entry is served.", explanation: "It is fresh." },
         ] }),
       },
       {
@@ -71,7 +71,7 @@ test("hard role scorers accept equivalent structured findings and faithful prose
     assert.equal(result.status, 0, result.stderr);
     const score = JSON.parse(result.stdout);
     assert.deepEqual(score.results[0], {
-      model: "structured-reviewer", fixture: "reviewer-tenant-cache", hasMustFix: true,
+      model: "structured-reviewer", fixture: "reviewer-tenant-cache", structuredOutputPresent: true, hasMustFix: true,
       expectedFindingCount: 2, matchedFindingCount: 2, missedFindingCount: 0,
       falsePositiveCount: 0, matchesOracle: true,
     });

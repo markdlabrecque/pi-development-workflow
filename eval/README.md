@@ -10,6 +10,9 @@ This retained tracer compares fixed workflow-role model assignments with frozen,
 | `test-writer-cache-boundary` | Test Writer | Add tests for TTL equality and future timestamps | Red on original, green on correct code, two mutants killed, production unchanged |
 | `implementer-atomic-reservation` | Implementer | Implement atomic inventory reservation | Visible and hidden tests, aggregate duplicate-SKU demand, workspace contract |
 | `reviewer-tenant-cache` | Reviewer | Review tenant isolation and expiration boundaries | Both seeded defects and zero unsupported findings |
+| `reviewer-async-authorization` | Reviewer | Review request scope and concurrent authorization | Both independent authorization defects and zero unsupported findings |
+| `reviewer-transfer-atomicity` | Reviewer | Review transfer atomicity and idempotency | Both storage defects and zero unsupported findings |
+| `reviewer-api-compatibility` | Reviewer | Review request and response compatibility | Both public-contract defects and zero unsupported findings |
 | `reporter-audit-fidelity` | Reporter | Produce an auditable completion report | Fixed sections, required facts, and contradiction checks |
 
 The scoring oracle and hidden tests are not included in model prompts or result records.
@@ -44,9 +47,11 @@ Coding live runs currently require macOS `sandbox-exec` and fail closed on other
 
 `MODEL_TIMEOUT_MS` configures the model timeout; the default is 180000 ms. Timeout handling escalates from `SIGTERM` to `SIGKILL`. Timed-out, signaled, and nonzero-exit runs are persisted but rejected by both `run` and `score`. Artifact paths and content are validated before private grading.
 
-## Repeated benchmark
+## Repeated benchmarks
 
-The final decision set ran every model ten times on every role fixture. Luna won Test Writer, Implementer, and Reviewer after quality ties because it cost far less. Sol won Reporter with 10/10 fidelity, compared with Luna at 7/10 and Terra at 8/10. See `docs/reports/2026-08-24-model-assignment-benchmark.md` for latency, cost, uncertainty, discarded exploratory samples, and assignment limits.
+The original decision set ran every model ten times on one fixture per role. See `docs/reports/2026-08-24-model-assignment-benchmark.md`.
+
+A later hardened Reviewer decision set ran ten fresh samples per model across four Reviewer fixtures. Sol passed 36/40, Luna 27/40, and Terra 14/40, so the runtime Reviewer assignment remains Sol. See `docs/reports/2026-08-24-reviewer-hardened-benchmark.md`. The original evidence remains retained separately.
 
 ## Test
 

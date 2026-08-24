@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "createdDate": "2026-08-24",
+  "decisionSet": {
+    "records": 120,
+    "runsPerModelFixture": 10,
+    "models": [
+      "openai-codex/gpt-5.6-luna",
+      "openai-codex/gpt-5.6-terra",
+      "openai-codex/gpt-5.6-sol"
+    ],
+    "batches": {
+      "tenantCache": {
+        "ignoredJsonlPath": "eval/results/reviewer-tenant-cache-hardened-final-10.jsonl",
+        "scorePath": "eval/results/reviewer-tenant-cache-hardened-final-10-score.json",
+        "recordCount": 30,
+        "rawSha256": "94089e14cae71f9bee5c2e378fe4ccfc46dd9f802545393d451c0ff76bdd1794",
+        "scoreSha256": "e90f89b04fa05a38aa5da39454d528a4870789f773f8a43ce3684fb3c67d5969"
+      },
+      "asyncAuthorization": {
+        "ignoredJsonlPath": "eval/results/reviewer-async-authorization-hardened-final-10.jsonl",
+        "scorePath": "eval/results/reviewer-async-authorization-hardened-final-10-score.json",
+        "recordCount": 30,
+        "rawSha256": "053fdfbcee9a5117b9791581324fb59546241b45eab0fab6a8ea9fd8b0f3ec6c",
+        "scoreSha256": "42f69fea981d5608e9c1ec52c58f60f67bba3e0a9d680772b495af11a0d968d5"
+      },
+      "transferAtomicity": {
+        "ignoredJsonlPath": "eval/results/reviewer-transfer-atomicity-hardened-final-10.jsonl",
+        "scorePath": "eval/results/reviewer-transfer-atomicity-hardened-final-10-score.json",
+        "recordCount": 30,
+        "rawSha256": "21a4c59d3015561a453420ccb092d5b1770f62475e149c5374075ef5288181b2",
+        "scoreSha256": "af8baab3d97937785dfa06ddff5c31960fe8361e4d6a59097f165fcd6cd75922"
+      },
+      "apiCompatibility": {
+        "ignoredJsonlPath": "eval/results/reviewer-api-compatibility-hardened-final-10.jsonl",
+        "scorePath": "eval/results/reviewer-api-compatibility-hardened-final-10-score.json",
+        "recordCount": 30,
+        "rawSha256": "9f6a6d1f5f3bdda08c396ea98a95c11e7f0a7e7acfaa448c57f9653ffd899d26",
+        "scoreSha256": "e7ff05d1b725a0a4b5af9fa1e17ced7668ef24aeebbefca04fb522b263a6fb71"
+      }
+    }
+  },
+  "sources": {
+    "generation": {
+      "evaluatorSha256": "c89492c79f9c57882ab6efdc45724450afbfe0b6a3065c586e52ef136c6f8ad2",
+      "fixturesSha256": "2d08f47094937e7769ba4dcf24ed0ec5f9165d2e05965730611a7c0cf845e1d6"
+    },
+    "finalScoring": {
+      "evaluatorPath": "eval/model-assignment-eval.mjs",
+      "evaluatorSha256": "af8a43754840fdd86c560e33a8f0df0154f1af3ec4f4864f3714466958d1a1bd",
+      "fixturesPath": "eval/model-assignment-fixtures.mjs",
+      "fixturesSha256": "507f06f4349a0dbf548ce8fe6f4f3d054f9ff3e6ab179fc6f255a9364b3f467b"
+    }
+  },
+  "aggregateResults": {
+    "luna": { "passes": 27, "runs": 40, "matchedFindings": 65, "expectedFindings": 80, "unsupportedFindings": 6 },
+    "terra": { "passes": 14, "runs": 40, "matchedFindings": 53, "expectedFindings": 80, "unsupportedFindings": 28 },
+    "sol": { "passes": 36, "runs": 40, "matchedFindings": 77, "expectedFindings": 80, "unsupportedFindings": 4 }
+  },
+  "decision": "Retain openai-codex/gpt-5.6-sol for Reviewer.",
+  "note": "Raw JSONL is ignored because it contains model responses. After blind generation, manual inspection and independent review found equivalent accurate semantics that the private grader rejected and false-pass paths in schema, dedicated semantic fields, contradictions, and known safe distractors. Red regressions were added, only private oracle/scoring behavior changed, the unchanged raw decision set was rescored, and hashes bind both generation and final scoring sources. Prompts and raw responses were not changed."
+}

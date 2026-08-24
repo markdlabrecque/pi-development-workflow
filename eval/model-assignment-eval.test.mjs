@@ -51,13 +51,13 @@ test("score accepts structured locations and counts only extra must-fix findings
         fixture: "reviewer-missing-validation",
         model: "split-location",
         exitStatus: 0,
-        response: 'Review complete. {"findings":[{"severity":"must_fix","file":"src/signup.js","line":2,"explanation":"Email validation is missing."}]}',
+        response: '{"findings":[{"severity":"must_fix","file":"src/signup.js","line":2,"evidence":"store.write({ email: input.email })","cause":"input.email is written without validation","impact":"an invalid address is persisted","explanation":"Validate before store.write."}]}',
       },
       {
         fixture: "reviewer-missing-validation",
         model: "extra-finding",
         exitStatus: 0,
-        response: '{"findings":[{"severity":"must_fix","location":"src/signup.js:2","explanation":"Missing email validation."},{"severity":"must_fix","location":"src/other.js:9","explanation":"Unrelated claim."}]}',
+        response: '{"findings":[{"severity":"must_fix","location":"src/signup.js:2","evidence":"store.write({ email: input.email })","cause":"input.email is written without validation","impact":"an invalid address is persisted","explanation":"Validate before store.write."},{"severity":"must_fix","location":"src/other.js:9","cause":"unrelated code","impact":"unrelated impact","explanation":"Unrelated claim."}]}',
       },
     ];
     await writeFile(input, `${records.map(JSON.stringify).join("\n")}\n`);

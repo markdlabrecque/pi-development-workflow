@@ -134,45 +134,84 @@ async function run(options) {
   if (!options.dryRun) { const failed = records.find((r) => r.timedOut || r.exitStatus !== 0 || r.signal || !r.response); if (failed) throw new Error(`Pi failed for ${failed.model}; exit status ${failed.exitStatus ?? "unavailable"}${failed.signal ? `, signal ${failed.signal}` : ""}${failed.stderr ? `: ${failed.stderr.trim()}` : ""}`); }
 }
 function responseFindings(response) {
-  const text = String(response ?? "");
-  let start = -1; let depth = 0; let quoted = false; let escaped = false; let latest;
-  for (let index = 0; index < text.length; index++) {
-    const character = text[index];
-    if (quoted) {
-      if (escaped) escaped = false;
-      else if (character === "\\") escaped = true;
-      else if (character === '"') quoted = false;
-      continue;
-    }
-    if (character === '"') { quoted = true; continue; }
-    if (character === "{") { if (depth === 0) start = index; depth++; }
-    else if (character === "}" && depth > 0 && --depth === 0 && start >= 0) {
-      try { const parsed = JSON.parse(text.slice(start, index + 1)); if (Array.isArray(parsed.findings)) latest = parsed.findings; } catch {}
-    }
-  }
-  return latest ?? [text];
+  try {
+    const parsed = JSON.parse(String(response ?? "").trim());
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) && Object.keys(parsed).length === 1 && Array.isArray(parsed.findings)
+      ? { findings: parsed.findings, structuredOutputPresent: true } : { findings: [], structuredOutputPresent: false };
+  } catch { return { findings: [], structuredOutputPresent: false }; }
 }
-function findingText(finding) { return JSON.stringify(finding).toLowerCase(); }
-function findingLocation(finding) {
-  if (finding && typeof finding === "object") return [finding.location, finding.file, finding.snippet, finding.code, finding.range, finding.line != null && finding.file ? `${finding.file}:${finding.line}` : ""].filter(Boolean).join(" ").toLowerCase();
-  return String(finding).toLowerCase();
+function findingText(finding) { return JSON.stringify(finding ?? "").toLowerCase(); }
+function locationFields(finding) {
+  if (!finding || typeof finding !== "object") return [];
+  return [finding.file, finding.location]
+    .filter((value) => typeof value === "string").map((value) => value.toLowerCase());
+}
+function hasExactLocation(finding, oracle) {
+  const fields = locationFields(finding); const file = String(oracle.file).toLowerCase();
+  const declaredFile = typeof finding.file === "string" ? finding.file.toLowerCase() : undefined;
+  if (declaredFile && declaredFile !== file) return false;
+  const explicitLocationFields = [finding.location].filter((value) => typeof value === "string").map((value) => value.toLowerCase());
+  for (const field of explicitLocationFields) {
+    for (const match of field.matchAll(/([a-z0-9_./-]+\.[a-z0-9]+):\d+/g)) if (match[1] !== file) return false;
+  }
+  if (!fields.some((field) => field === file || field.startsWith(`${file}:`) || field.includes(` ${file}:`))) return false;
+  const allowedLines = oracle.allowedLines ?? (oracle.line == null ? [] : [oracle.line]);
+  const line = Number(finding.line);
+  if (Number.isInteger(line) && !allowedLines.includes(line)) return false;
+  const explicitFileLocations = fields.filter((field) => field.includes(`${file}:`));
+  if (explicitFileLocations.some((field) => !allowedLines.some((allowed) => new RegExp(`(?:^|[^0-9])${allowed}(?:$|[^0-9])`).test(field)))) return false;
+  if (Number.isInteger(line) && allowedLines.includes(line)) return true;
+  if (fields.some((field) => allowedLines.some((allowed) => new RegExp(`(?:^|[^0-9])${allowed}(?:$|[^0-9])`).test(field)))) return true;
+  return (oracle.anchors ?? []).some((anchor) => fields.some((field) => field.includes(anchor.toLowerCase())));
+}
+function evidenceIn(finding, field, terms) {
+  const value = typeof finding?.[field] === "string" ? finding[field].toLowerCase() : "";
+  return (terms ?? []).every((term) => value.includes(term.toLowerCase()));
+}
+function hasCodeEvidence(finding, oracle) {
+  if (!oracle.evidenceGroups) return evidenceIn(finding, "evidence", oracle.evidenceTerms);
+  const evidence = typeof finding?.evidence === "string" ? finding.evidence.toLowerCase() : "";
+  return oracle.evidenceGroups.every((alternatives) => alternatives.some((term) => evidence.includes(term.toLowerCase())));
+}
+function evidenceGroupsIn(finding, field, groups, fallbackTerms) {
+  const fieldValue = typeof finding?.[field] === "string" ? finding[field].trim().toLowerCase() : "";
+  if (!fieldValue) return false;
+  const requiredGroups = groups ?? (fallbackTerms ?? []).map((term) => [term]);
+  return requiredGroups.every((alternatives) => alternatives.some((term) => fieldValue.includes(term.toLowerCase())));
+}
+function validReviewerFindingSchema(finding) {
+  if (!finding || typeof finding !== "object" || Array.isArray(finding)) return false;
+  const allowed = new Set(["severity", "file", "line", "location", "evidence", "cause", "impact", "explanation"]);
+  if (Object.keys(finding).some((key) => !allowed.has(key))) return false;
+  if (finding.line !== undefined && !Number.isInteger(finding.line)) return false;
+  for (const key of ["severity", "evidence", "cause", "impact", "explanation"]) if (typeof finding[key] !== "string" || !finding[key].trim()) return false;
+  const hasFile = typeof finding.file === "string" && finding.file.trim().length > 0;
+  const hasLocation = typeof finding.location === "string" && finding.location.trim().length > 0;
+  return (hasFile || hasLocation) && (Number.isInteger(finding.line) || hasLocation);
+}
+function matchesReviewerFinding(finding, oracle, forbiddenTerms = []) {
+  const text = findingText(finding);
+  const contradicts = ["behavior is correct", "behaviour is correct", "finding is unsupported", "should remain unchanged", ...forbiddenTerms].some((term) => text.includes(term));
+  const claims = `${finding?.cause ?? ""} ${finding?.impact ?? ""}`;
+  const deniesDefect = (oracle.denialPatterns ?? []).some((pattern) => new RegExp(pattern, "i").test(claims));
+  return validReviewerFindingSchema(finding) && !contradicts && !deniesDefect && hasExactLocation(finding, oracle) && hasCodeEvidence(finding, oracle)
+    && evidenceGroupsIn(finding, "cause", oracle.causeGroups, oracle.causeTerms ?? oracle.terms)
+    && evidenceGroupsIn(finding, "impact", oracle.impactGroups, oracle.impactTerms ?? oracle.anyTerms)
+    && !(oracle.rejectTerms ?? []).some((term) => text.includes(term));
 }
 function scoreReviewer(record, fixture) {
-  const expected = fixture.oracle.findings; const findings = responseFindings(record.response);
-  const blocking = findings.map((finding, index) => ({ finding, index })).filter(({ finding }) => /must[_ -]?fix/i.test([finding?.severity, finding?.classification, finding].filter(Boolean).join(" ")));
+  const parsed = responseFindings(record.response); const expected = fixture.oracle.findings; const findings = parsed.findings;
+  const blocking = findings.map((finding, index) => ({ finding, index })).filter(({ finding }) => finding && typeof finding === "object" && /^must[_ -]?fix$/i.test(String(finding.severity ?? "")));
   const used = new Set();
   const matched = expected.filter((oracle) => {
-    const match = blocking.find(({ finding, index }) => {
-      const text = findingText(finding);
-      return !used.has(index) && findingLocation(finding).includes(oracle.file) && oracle.terms.every((term) => text.includes(term)) && (!oracle.anyTerms || oracle.anyTerms.some((term) => text.includes(term))) && !(oracle.rejectTerms ?? []).some((term) => text.includes(term));
-    });
+    const match = blocking.find(({ finding, index }) => !used.has(index) && matchesReviewerFinding(finding, oracle, fixture.oracle.forbiddenFindingTerms));
     if (!match) return false;
     used.add(match.index); return true;
   });
-  const falsePositiveCount = findings.filter((finding, index) => !used.has(index) && !/\b(?:approved|no[_ -]?finding)\b/i.test([finding?.classification, finding?.severity].filter(Boolean).join(" "))).length;
-  return { model: record.model, fixture: record.fixture, hasMustFix: blocking.length > 0, expectedFindingCount: expected.length,
+  const falsePositiveCount = findings.filter((finding, index) => !used.has(index)).length;
+  return { model: record.model, fixture: record.fixture, structuredOutputPresent: parsed.structuredOutputPresent, hasMustFix: blocking.length > 0, expectedFindingCount: expected.length,
     matchedFindingCount: matched.length, missedFindingCount: expected.length - matched.length, falsePositiveCount,
-    matchesOracle: matched.length === expected.length && falsePositiveCount === 0 };
+    matchesOracle: parsed.structuredOutputPresent && matched.length === expected.length && falsePositiveCount === 0 };
 }
 function markdownSections(text) {
   const headings = [...text.matchAll(/^#{1,6} .+$/gim)].map((m) => ({ name: m[0].trim().toLowerCase(), start: m.index, end: m.index + m[0].length }));
