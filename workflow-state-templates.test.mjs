@@ -47,7 +47,7 @@ test("migrateState upgrades version one without mutating it", () => {
   const migrated = state.migrateState(legacy);
 
   assert.equal(migrated.version, state.CURRENT_STATE_VERSION);
-  assert.deepEqual(migrated.stageSequence, ["planning", "implementing", "testing", "reviewing", "reporting"]);
+  assert.deepEqual(migrated.stageSequence, ["implementing", "testing", "reviewing", "reporting"]);
   assert.deepEqual(migrated.systemOfRecord, { type: "github", repository: "owner/repository", approved: true }, "v1 GitHub authorization provenance is preserved");
   assert.equal(legacy.version, 1);
   assert.equal(legacy.stageSequence, undefined);
@@ -71,7 +71,7 @@ test("strict single-state loads report corrupt and future data while list isolat
     await writeFile(state.statePath(legacyId), JSON.stringify(legacy));
     const loadedLegacy = await state.loadState(legacyId);
     assert.equal(loadedLegacy.version, state.CURRENT_STATE_VERSION, "loadState should migrate v1 transparently");
-    assert.deepEqual(loadedLegacy.stageSequence, ["planning", "implementing", "testing", "reviewing", "reporting"]);
+    assert.deepEqual(loadedLegacy.stageSequence, ["implementing", "testing", "reviewing", "reporting"]);
 
     const future = validState(futureId);
     future.version = 99;

@@ -333,11 +333,11 @@ test("before_agent_start injects role-specific prompt for workflow child session
   // Set PI_SUBAGENT_ID for workflow child sessions
   process.env.PI_SUBAGENT_ID = `workflow-test123:planner`; process.env.PI_WORKFLOW_ID = "test123"; process.env.PI_WORKFLOW_ROLE = "planner";
   const plannerPrompt = await emit(mock, "before_agent_start", { systemPrompt: "base system" });
-  assert.match(plannerPrompt.systemPrompt, /Planner/);
-  assert.match(plannerPrompt.systemPrompt, /Read and search only/);
+  assert.match(plannerPrompt.systemPrompt, /development-workflow Orchestrator/);
+  delete process.env.PI_SUBAGENT_ID; delete process.env.PI_WORKFLOW_ID; delete process.env.PI_WORKFLOW_ROLE;
 
   // Workflow child session with reviewer role
-  process.env.PI_SUBAGENT_ID = `workflow-test123:reviewer`; process.env.PI_WORKFLOW_ROLE = "reviewer";
+  process.env.PI_SUBAGENT_ID = `workflow-test123:reviewer`; process.env.PI_WORKFLOW_ID = "test123"; process.env.PI_WORKFLOW_ROLE = "reviewer";
   const reviewerPrompt = await emit(mock, "before_agent_start", { systemPrompt: "base system" });
   assert.match(reviewerPrompt.systemPrompt, /Reviewer/);
   assert.match(reviewerPrompt.systemPrompt, /read-only Reviewer/);
@@ -388,7 +388,7 @@ test("tool_call allows development_workflow from workflow-scoped child sessions 
   assert.equal(blockedResult.block, true, "Should block non-child sessions when disabled");
 
   // Workflow-scoped child session is STILL allowed even when disabled
-  process.env.PI_SUBAGENT_ID = `workflow-${workflowId}:planner`; process.env.PI_WORKFLOW_ID = workflowId; process.env.PI_WORKFLOW_ROLE = "planner";
+  process.env.PI_SUBAGENT_ID = `workflow-${workflowId}:implementer`; process.env.PI_WORKFLOW_ID = workflowId; process.env.PI_WORKFLOW_ROLE = "implementer";
   const childResult = await emit(mock, "tool_call", { toolName: "development_workflow", input: { action: "status", workflowId } });
   assert.equal(childResult, undefined, "Should allow an owned workflow child action when disabled");
   await assert.doesNotReject(workflow.execute("child-status", { action: "status", workflowId }, undefined, undefined, mock.ctx), "workflow child execution remains available");
@@ -396,9 +396,9 @@ test("tool_call allows development_workflow from workflow-scoped child sessions 
   assert.deepEqual(crossWorkflow, { block: true, reason: "Workflow children may access only their own workflowId." });
   await assert.rejects(workflow.execute("cross-workflow", { action: "status", workflowId: "workflow-other" }, undefined, undefined, mock.ctx), /only their own workflowId/);
   await assert.rejects(workflow.execute("child-start", { action: "start", workflowId, goal: "forbidden" }, undefined, undefined, mock.ctx), /may not perform start actions/);
-  await assert.doesNotReject(workflow.execute("planner-record", { action: "record", workflowId, agentId: "planner", plan: "approved plan" }, undefined, undefined, mock.ctx));
-  await assert.rejects(workflow.execute("wrong-agent", { action: "record", workflowId, agentId: "implementer", plan: "forbidden" }, undefined, undefined, mock.ctx), /require agentId=planner/);
-  await assert.rejects(workflow.execute("wrong-field", { action: "record", workflowId, agentId: "planner", implementationSummary: "forbidden" }, undefined, undefined, mock.ctx), /may not record implementationSummary/);
+  await assert.doesNotReject(workflow.execute("implementer-record", { action: "record", workflowId, agentId: "implementer", implementationSummary: "done" }, undefined, undefined, mock.ctx));
+  process.env.PI_SUBAGENT_ID = `workflow-${workflowId}:planner`; process.env.PI_WORKFLOW_ROLE = "planner";
+  await assert.rejects(workflow.execute("removed-planner", { action: "status", workflowId }, undefined, undefined, mock.ctx), /Malformed workflow child identity|Invalid workflow role|Unknown workflow role/);
   process.env.PI_SUBAGENT_ID = `workflow-${workflowId}:reporter`; process.env.PI_WORKFLOW_ROLE = "reporter";
   await assert.rejects(workflow.execute("child-complete", { action: "complete", workflowId }, undefined, undefined, mock.ctx), /may not perform complete actions/);
 
@@ -782,10 +782,7 @@ test("role config module exports correct defaults", async () => {
   const rolesModule = await jiti.import(rolesPath, { default: true });
 
   // Test getRoleConfig
-  const planner = rolesModule.getRoleConfig("planner");
-  assert.equal(planner.name, "planner");
-  assert.equal(planner.thinking, "high");
-  assert.equal(planner.readOnly, true);
+  assert.throws(() => rolesModule.getRoleConfig("planner"), /Unknown workflow role/);
 
   const reviewer = rolesModule.getRoleConfig("reviewer");
   assert.equal(reviewer.thinking, "medium");

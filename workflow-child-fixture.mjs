@@ -17,7 +17,7 @@ const handlers = new Map(), tools = new Map();
 const pi = { events: { emit() {}, on() {} }, on(name, handler) { const all = handlers.get(name) ?? []; all.push(handler); handlers.set(name, all); }, registerTool(tool) { tools.set(tool.name, tool); }, registerCommand() {}, getActiveTools() { return ["development_workflow"]; }, setActiveTools() {} };
 const ctx = { cwd: process.cwd(), hasUI: false, modelRegistry: { find: () => ({}) }, isProjectTrusted: () => false, ui: { setStatus() {}, notify() {} } };
 extension(pi);
-const input = action === "advance" ? { action, workflowId, stage: "implementing" } : { action, workflowId, agentId: "planner", plan: "from child" };
+const input = action === "advance-testing" ? { action: "advance", workflowId, stage: "testing" } : action === "advance" ? { action, workflowId, stage: "implementing" } : { action, workflowId, agentId: "planner", plan: "from child" };
 let hook;
 for (const handler of handlers.get("tool_call") ?? []) hook = await handler({ toolName: "development_workflow", input }, ctx);
 if (hook?.block) throw new Error(hook.reason);

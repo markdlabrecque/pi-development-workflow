@@ -10,5 +10,5 @@ const { transactState, transition } = await jiti.import("./workflow-state.ts");
 await transactState(workflowId, async state => {
   await writeFile(ready, "locked");
   while (true) { try { await access(release); break; } catch { await new Promise(resolve => setTimeout(resolve, 10)); } }
-  transition(state, "implementing", "child transaction");
+  transition(state, "testing", "child transaction");
 });

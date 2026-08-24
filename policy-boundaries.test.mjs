@@ -60,7 +60,7 @@ test("child policy denies every terminal action at hook and execution boundaries
     const foregroundAbort = await workflow.execute("foreground-abort", { action: "abort", workflowId: foregroundTerminalId, reason: "orchestrator decision" }, undefined, undefined, mock.ctx);
     assert.equal(foregroundAbort.details.stage, "aborted");
 
-    for (const role of ["planner", "implementer", "test-writer", "reviewer", "reporter"]) {
+    for (const role of ["implementer", "test-writer", "reviewer", "reporter"]) {
       process.env.PI_SUBAGENT_CHILD = "1";
       process.env.PI_SUBAGENT_ID = `${workflowId}:${role}`;
       process.env.PI_WORKFLOW_ID = workflowId;
