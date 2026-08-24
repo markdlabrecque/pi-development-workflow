@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "createdDate": "2026-08-24",
+  "decisionSet": {
+    "records": 120,
+    "runsPerModelFixture": 10,
+    "batches": {
+      "testWriter": {
+        "ignoredJsonlPath": "eval/results/test-writer-cache-boundary-benchmark-10.jsonl",
+        "recordCount": 30,
+        "sha256": "b131503f287dd673540dc3ef6f69d5ef532dca0c5228af5aedb1c2059c04976f"
+      },
+      "implementer": {
+        "ignoredJsonlPath": "eval/results/implementer-atomic-reservation-benchmark-10.jsonl",
+        "recordCount": 30,
+        "sha256": "23a76b750e52147d98048e394d777433b61cb1fa9f57f8ada69adaf2079360e5"
+      },
+      "reviewer": {
+        "ignoredJsonlPath": "eval/results/reviewer-tenant-cache-benchmark-frozen-10.jsonl",
+        "recordCount": 30,
+        "sha256": "eac400216e8327dffdf02b8208223ec02e3d6fb66a485c073358de3164f6eb17"
+      },
+      "reporter": {
+        "ignoredJsonlPath": "eval/results/reporter-audit-fidelity-benchmark-frozen-10.jsonl",
+        "recordCount": 30,
+        "sha256": "650af3ada1340688e8e85be05021be9e9e591f599230728b9bb2afc89766e634"
+      }
+    }
+  },
+  "sources": {
+    "scorer": {
+      "path": "eval/model-assignment-eval.mjs",
+      "sha256": "86a9ed252d56b1bd88900fffef0f06bc9bb189c120d4fa849f209501bd0cfcf8"
+    },
+    "fixtures": {
+      "path": "eval/model-assignment-fixtures.mjs",
+      "sha256": "fd4f69b9e1967aeb5e62c9efb05675e36ba098c6dc472155c32d8aca7251ac23"
+    }
+  },
+  "results": {
+    "testWriter": {
+      "luna": "10/10",
+      "terra": "10/10",
+      "sol": "10/10"
+    },
+    "implementer": {
+      "luna": "10/10",
+      "terra": "10/10",
+      "sol": "10/10"
+    },
+    "reviewer": {
+      "luna": "10/10",
+      "terra": "10/10",
+      "sol": "10/10"
+    },
+    "reporter": {
+      "luna": "7/10",
+      "terra": "8/10",
+      "sol": "10/10"
+    }
+  },
+  "note": "Raw JSONL is ignored because it contains model responses. Hashes bind the local decision set to this retained summary."
+}

@@ -108,7 +108,7 @@ Diff:
 The loader promise is deliberately not cached: a rejected loader must not poison later requests. Review the complete changed function above.`,
     oracle: { findings: [
       { file: "src/tenant-cache.mjs", line: 10, terms: ["tenant", "key"] },
-      { file: "src/tenant-cache.mjs", line: 12, terms: ["expir", "bound"] },
+      { file: "src/tenant-cache.mjs", line: 12, terms: ["expir"], anyTerms: ["bound", "exact", ">=", "==="], rejectTerms: ["behavior is correct", "should remain", "works correctly", "correctly served", "correctly returned", "should be served"] },
     ] },
   },
   "reporter-audit-fidelity": {

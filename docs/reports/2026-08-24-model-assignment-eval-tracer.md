@@ -71,4 +71,4 @@ Delegated attempts encountered file-ownership locks, so the foreground applied s
 
 ## Follow-up
 
-Add multiple frozen fixtures and clean controls per role, repeat every model/fixture combination, and aggregate recall, false-positive rate, variance, latency, and cost before changing fixed assignments.
+The repeated benchmark is recorded in `docs/reports/2026-08-24-model-assignment-benchmark.md`. Add more frozen tasks and clean controls per role before treating its recommendations as broad model rankings.

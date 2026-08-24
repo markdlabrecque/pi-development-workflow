@@ -162,7 +162,10 @@ function scoreReviewer(record, fixture) {
   const blocking = findings.map((finding, index) => ({ finding, index })).filter(({ finding }) => /must[_ -]?fix/i.test([finding?.severity, finding?.classification, finding].filter(Boolean).join(" ")));
   const used = new Set();
   const matched = expected.filter((oracle) => {
-    const match = blocking.find(({ finding, index }) => !used.has(index) && findingLocation(finding).includes(oracle.file) && oracle.terms.every((term) => findingText(finding).includes(term)));
+    const match = blocking.find(({ finding, index }) => {
+      const text = findingText(finding);
+      return !used.has(index) && findingLocation(finding).includes(oracle.file) && oracle.terms.every((term) => text.includes(term)) && (!oracle.anyTerms || oracle.anyTerms.some((term) => text.includes(term))) && !(oracle.rejectTerms ?? []).some((term) => text.includes(term));
+    });
     if (!match) return false;
     used.add(match.index); return true;
   });
@@ -195,7 +198,7 @@ function scoreReporter(record, fixture) {
   const requiredHeadings = ["# report", "## verification"];
   const templateMissing = requiredHeadings.some((heading) => !sections.has(heading));
   const allText = String(record.response ?? "").toLowerCase();
-  const contradictions = [/no (?:follow[- ]?ups?|deviations?|unresolved risks?)/, /retry(?:ing)? is unnecessary/, /no (?:reason|risk|evidence)/, /(?:follow[- ]?up|risk)\s*:\s*(?:none|nothing|no )/, /(?:posting succeeded|posted successfully|successfully posted|recorded successfully)/].filter((re) => re.test(allText)).length;
+  const contradictions = [/no (?:follow[- ]?ups?|deviations?|unresolved risks?)/, /retry(?:ing)? is unnecessary/, /no (?:reason|risk|evidence)/, /(?:follow[- ]?up|risk)\s*:\s*(?:none|nothing|no )/, /(?:posting succeeded|posted successfully|(?<!not )successfully posted|recorded successfully|transport (?:succeeded|was successful))/].filter((re) => re.test(allText)).length;
   return { model: record.model, fixture: record.fixture, requiredFactCount: groups.length, matchedFactCount: matched, contradictionCount: contradictions + (templateMissing ? 1 : 0), matchesOracle: matched === groups.length && contradictions === 0 && !templateMissing };
 }
 function command(args, cwd) {

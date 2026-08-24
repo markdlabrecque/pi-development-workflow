@@ -44,18 +44,9 @@ Coding live runs currently require macOS `sandbox-exec` and fail closed on other
 
 `MODEL_TIMEOUT_MS` configures the model timeout; the default is 180000 ms. Timeout handling escalates from `SIGTERM` to `SIGKILL`. Timed-out, signaled, and nonzero-exit runs are persisted but rejected by both `run` and `score`. Artifact paths and content are validated before private grading.
 
-## Frozen expansion sample
+## Repeated benchmark
 
-One post-fix run per model and fixture produced these results:
-
-| Role fixture | Luna | Terra | Sol |
-|---|---:|---:|---:|
-| Test Writer | pass, 26.1 s, $0.00032 | pass, 21.8 s, $0.00670 | pass, 31.3 s, $0.02203 |
-| Implementer | pass, 39.0 s, $0.00032 | pass, 52.0 s, $0.00595 | pass, 44.6 s, $0.01585 |
-| Reviewer | pass, 16.9 s, $0.00094 | pass, 14.6 s, $0.00772 | pass, 18.8 s, $0.01928 |
-| Reporter | pass, 10.5 s, $0.00049 | pass, 10.7 s, $0.00448 | pass, 10.6 s, $0.01072 |
-
-These runs validate harder role-specific tasks and the harness, not a model ranking. Each cell is one sample, every model passed, and two scorer parsing corrections were made after inspecting otherwise compliant Reviewer and Reporter output. Comparative decisions require more frozen fixtures, clean controls, and repeated runs.
+The final decision set ran every model ten times on every role fixture. Luna won Test Writer, Implementer, and Reviewer after quality ties because it cost far less. Sol won Reporter with 10/10 fidelity, compared with Luna at 7/10 and Terra at 8/10. See `docs/reports/2026-08-24-model-assignment-benchmark.md` for latency, cost, uncertainty, discarded exploratory samples, and assignment limits.
 
 ## Test
 
