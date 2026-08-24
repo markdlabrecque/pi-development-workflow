@@ -33,7 +33,14 @@ test("role routing matches Claude analogs and defaults to two review rounds", as
   assert.equal(roles.getRoleConfig("test-writer").model, "openai-codex/gpt-5.6-luna");
   assert.equal(roles.getRoleConfig("implementer").model, "openai-codex/gpt-5.6-luna");
   assert.equal(roles.getRoleConfig("reviewer").model, "openai-codex/gpt-5.6-sol");
-  assert.equal(roles.getRoleConfig("reporter").model, "openai-codex/gpt-5.6-luna");
+  assert.equal(roles.getRoleConfig("reporter").model, "openai-codex/gpt-5.6-sol");
+  const reporterProfile = fs.readFileSync(path.join(here, "agents", "reporter.md"), "utf8");
+  assert.match(reporterProfile, /^model: openai-codex\/gpt-5\.6-sol$/m);
+  const readme = fs.readFileSync(path.join(here, "README.md"), "utf8");
+  assert.match(readme, /\| Test Writer \| `openai-codex\/gpt-5\.6-luna` \|/);
+  assert.match(readme, /\| Implementer \| `openai-codex\/gpt-5\.6-luna` \|/);
+  assert.match(readme, /\| Reviewer \| `openai-codex\/gpt-5\.6-sol` \|/);
+  assert.match(readme, /\| Reporter \| `openai-codex\/gpt-5\.6-sol` \|/);
   const source = fs.readFileSync(path.join(here, "index.ts"), "utf8");
   assert.match(source, /DEFAULT_MAX_REVIEW_CYCLES = 2/);
   assert.doesNotMatch(source, /ollama\/qwen3\.6-pi/);

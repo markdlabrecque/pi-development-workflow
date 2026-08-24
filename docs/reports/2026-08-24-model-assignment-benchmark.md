@@ -13,6 +13,10 @@ Use these assignments under the current role fixtures:
 
 Planner has no fixture, so this benchmark says nothing about its assignment.
 
+## Applied status
+
+The Reporter recommendation is applied: both runtime routing and the Reporter agent profile use `openai-codex/gpt-5.6-sol`. Test Writer and Implementer remain on Luna. The original Reviewer recommendation was not applied; the later hardened Reviewer benchmark retained Sol after it won 36/40 blind runs across four fixtures.
+
 ## Method
 
 The benchmark used ten fresh, isolated runs for every model and role fixture. A model had to satisfy every private check. Quality decided first. Mean cost broke quality ties, followed by median latency.

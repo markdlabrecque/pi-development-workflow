@@ -49,7 +49,7 @@ Coding live runs currently require macOS `sandbox-exec` and fail closed on other
 
 ## Repeated benchmarks
 
-The original decision set ran every model ten times on one fixture per role. See `docs/reports/2026-08-24-model-assignment-benchmark.md`.
+The original decision set ran every model ten times on one fixture per role. Its Reporter result has been applied: Reporter now uses Sol. See `docs/reports/2026-08-24-model-assignment-benchmark.md`.
 
 A later hardened Reviewer decision set ran ten fresh samples per model across four Reviewer fixtures. Sol passed 36/40, Luna 27/40, and Terra 14/40, so the runtime Reviewer assignment remains Sol. See `docs/reports/2026-08-24-reviewer-hardened-benchmark.md`. The original evidence remains retained separately.
 

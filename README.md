@@ -56,10 +56,10 @@ Role routing follows the Claude-role analogues and is provider-qualified:
 | Role | Model |
 |---|---|
 | Foreground Orchestrator | `openai-codex/gpt-5.6-sol` |
-| Test Writer | `openai-codex/gpt-5.6-terra` |
-| Implementer | `openai-codex/gpt-5.6-terra` |
+| Test Writer | `openai-codex/gpt-5.6-luna` |
+| Implementer | `openai-codex/gpt-5.6-luna` |
 | Reviewer | `openai-codex/gpt-5.6-sol` |
-| Reporter | `openai-codex/gpt-5.6-terra` |
+| Reporter | `openai-codex/gpt-5.6-sol` |
 
 Each model is resolved and authenticated at dispatch with an actionable error. Defaults are Test Writer **low**, Reporter **low**, Implementer **medium**, and Reviewer **medium** thinking; valid explicit overrides remain valid. Only this supported GPT-5.6 pair may be used as an explicit override. A supported override wins and is persisted so role dispatches and review rounds do not drift during the active session.
 

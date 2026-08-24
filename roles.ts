@@ -56,7 +56,7 @@ export const DEFAULT_ROLE_CONFIG: Record<RoleName, RoleConfig> = {
     name: "reporter",
     thinking: "low",
     maxTokens: 8192,
-    model: "openai-codex/gpt-5.6-luna",
+    model: "openai-codex/gpt-5.6-sol",
     readOnly: true,
     description: "Record workflow results and approved follow-up work",
   },
