@@ -77,6 +77,19 @@ function requestSubagentClose(pi: ExtensionAPI, workflowId: string): Promise<str
 }
 async function required(id: string | undefined, load: (workflowId: string) => Promise<WorkflowState | undefined>): Promise<WorkflowState> { if (!id) throw new Error("workflowId is required"); const state = await load(id); if (!state) throw new Error(`Unknown workflow: ${id}`); return state; }
 // Workflow subagent list/details report cumulative active run time separately from persistent idle/waiting time.
+const taskListStage: Record<Stage, string> = {
+  planning: "planning",
+  red_testing: "writing tests",
+  implementing: "implementation",
+  testing: "testing",
+  reviewing: "review",
+  fixing: "addressing QA feedback",
+  reporting: "reporting",
+  completed: "completed",
+  blocked: "blocked",
+  aborted: "aborted",
+};
+
 function statusText(s: WorkflowState, now = Date.now()): string {
   const maxCycles = s.review.maxReviewCycles ?? DEFAULT_MAX_REVIEW_CYCLES;
   const expiration = s.expiresAt === undefined ? "" : isWorkflowExpired(s.expiresAt, now)
@@ -339,6 +352,14 @@ export default function (pi: ExtensionAPI) {
   const diagnose = (workflowId: string, type: string, fields: Record<string, unknown> = {}): void => {
     void appendDiagnostic(createDiagnosticEvent(workflowId, type, { sessionId: sessionId(), runId: activeRunId, ...fields } as any)).catch(() => undefined);
   };
+  const publishTaskListUpdate = (state: WorkflowState): void => {
+    pi.events.emit("task-list:workflow", {
+      workflowId: state.id,
+      text: state.goal,
+      stage: taskListStage[state.stage],
+      done: state.stage === "completed" || state.stage === "aborted",
+    });
+  };
   // Notifications are session-scoped so one stale workflow cannot spam status checks,
   // while reload/session replacement deliberately permits one fresh warning.
   const staleWorkflowNotifications = new Set<string>();
@@ -422,6 +443,7 @@ export default function (pi: ExtensionAPI) {
     const active = await activeSessionStates();
     for (const id of [...sessionWorkflowIds]) if (!active.some(state => state.id === id)) untrackWorkflowId(id);
     refreshStaleWorkflowWarnings(active, ctx);
+    for (const state of active) publishTaskListUpdate(state);
     applyThreadMode(ctx);
     void pruneExpiredDiagnostics().catch(() => undefined);
     if (currentId) diagnose(currentId, "session_start", { metadata: { reason: _event.reason } });
@@ -786,6 +808,7 @@ export default function (pi: ExtensionAPI) {
         // Expiration is persisted as provided. Invalid values are never treated as expired.
         if (p.expiresAt !== undefined) state.expiresAt = p.expiresAt;
         await persist(state);
+        publishTaskListUpdate(state);
         diagnose(id, "workflow_start", { stage: state.stage, model: WORKFLOW_MODEL, planPath: approvedPlan.path, planDigest: approvedPlan.digest, metadata: { planBytes: approvedPlan.bytes, maxReviewCycles: state.review.maxReviewCycles } });
         refreshStaleWorkflowWarnings(await activeSessionStates(), ctx);
         return { content: [{ type: "text", text: `Started ${id} in red_testing with approved plan ${approvedPlan.path} (${approvedPlan.digest}). Dispatch test-writer first with lifecycle=workflow, workflowId=${id}, agentId=test-writer.` }], details: state };
@@ -954,6 +977,7 @@ export default function (pi: ExtensionAPI) {
       trackWorkflowId(s.id);
       stateCache.set(s);
       await updateRecordAfterCommit(s);
+      publishTaskListUpdate(s);
       return { content: [{ type: "text", text: statusText(s) }], details: s };
     },
     renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("workflow ")) + theme.fg("accent", `${args.action} ${args.workflowId ?? ""}`), 0, 0); },
