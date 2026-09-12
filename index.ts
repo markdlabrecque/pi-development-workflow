@@ -45,7 +45,7 @@ const InventoryArtifact = Type.Object({ artifact: Type.String(), evidence: Type.
 const AttemptFailure = Type.Object({ reason: Type.String(), exitCode: Type.Optional(Type.Number()), durationMs: Type.Optional(Type.Number()), usage: Type.Optional(Type.Object({ input: Type.Number(), output: Type.Number(), turns: Type.Optional(Type.Number()) })) });
 const Params = Type.Object({
   action: StringEnum(Actions), workflowId: Type.Optional(Type.String()), goal: Type.Optional(Type.String()), planPath: Type.Optional(Type.String({ description: "Required for start; approved plan document inside the repository" })), acceptanceCriteria: Type.Optional(Type.Array(Type.String())),
-  stage: Type.Optional(StringEnum(Stages)), note: Type.Optional(Type.String()), plan: Type.Optional(Type.String()), implementationSummary: Type.Optional(Type.String()),
+  stage: Type.Optional(StringEnum(Stages)), note: Type.Optional(Type.String()), tickets: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { description: "Explicit ticket or work-item titles shown in the workflow task list." })), plan: Type.Optional(Type.String()), implementationSummary: Type.Optional(Type.String()),
   files: Type.Optional(Type.Array(Type.String())), agentId: Type.Optional(Type.String()), testCommand: Type.Optional(Type.String()), testPassed: Type.Optional(Type.Boolean()),
   testOutput: Type.Optional(Type.String()), evidenceKind: Type.Optional(StringEnum(["targeted_red", "full_green", "review_gate"] as const)), expectedFailureReason: Type.Optional(Type.String()), findings: Type.Optional(Type.Array(Finding)), reviewOutput: Type.Optional(Type.String({ description: "Raw structured Reviewer JSON to parse" })), suspectedWeakness: Type.Optional(Type.String()), reporterContent: Type.Optional(Type.String()), outcome: Type.Optional(Type.String()), reason: Type.Optional(Type.String()),
   expiresAt: Type.Optional(Type.String({ description: "Optional ISO-8601 workflow expiration timestamp" })),
@@ -352,13 +352,27 @@ export default function (pi: ExtensionAPI) {
   const diagnose = (workflowId: string, type: string, fields: Record<string, unknown> = {}): void => {
     void appendDiagnostic(createDiagnosticEvent(workflowId, type, { sessionId: sessionId(), runId: activeRunId, ...fields } as any)).catch(() => undefined);
   };
-  const publishTaskListUpdate = (state: WorkflowState): void => {
-    pi.events.emit("task-list:workflow", {
-      workflowId: state.id,
-      text: state.goal,
-      stage: taskListStage[state.stage],
-      done: state.stage === "completed" || state.stage === "aborted",
-    });
+  const renderWorkflowTaskWidget = (states: WorkflowState[], ctx: ExtensionContext): void => {
+    if (!ctx.hasUI) return;
+    const active = states.filter(state => !["completed", "blocked", "aborted"].includes(state.stage));
+    if (!active.length) {
+      ctx.ui.setWidget("task-list", undefined);
+      pi.events.emit("development-workflow:ownership", { owned: false });
+      return;
+    }
+    const lines = ["Tasks"];
+    let number = 0;
+    for (const state of active) {
+      for (const ticket of state.tickets) {
+        number++;
+        lines.push(`${number === 1 ? "▶" : "○"} ${number}) ${ticket} (${taskListStage[state.stage]})`);
+      }
+    }
+    ctx.ui.setWidget("task-list", lines);
+    pi.events.emit("development-workflow:ownership", { owned: true });
+  };
+  const refreshWorkflowTaskWidget = async (ctx: ExtensionContext): Promise<void> => {
+    renderWorkflowTaskWidget(await activeSessionStates(), ctx);
   };
   // Notifications are session-scoped so one stale workflow cannot spam status checks,
   // while reload/session replacement deliberately permits one fresh warning.
@@ -443,7 +457,7 @@ export default function (pi: ExtensionAPI) {
     const active = await activeSessionStates();
     for (const id of [...sessionWorkflowIds]) if (!active.some(state => state.id === id)) untrackWorkflowId(id);
     refreshStaleWorkflowWarnings(active, ctx);
-    for (const state of active) publishTaskListUpdate(state);
+    renderWorkflowTaskWidget(active, ctx);
     applyThreadMode(ctx);
     void pruneExpiredDiagnostics().catch(() => undefined);
     if (currentId) diagnose(currentId, "session_start", { metadata: { reason: _event.reason } });
@@ -730,7 +744,10 @@ export default function (pi: ExtensionAPI) {
     else if (s.stage === "aborted") ctx.ui.notify(`Workflow ${s.id} aborted: ${s.blockingReason ?? "unknown"}`, "warning");
   };
 
-  pi.registerTool({ name: "development_workflow", label: "Development Workflow", description: "Create, route, inspect, and close structured development workflows for the current foreground session. The foreground agent remains the Orchestrator; dispatch role jobs through workflow-scoped subagents.", promptSnippet: "Manage session-scoped staged software-development workflows", parameters: Params,
+  pi.registerTool({ name: "development_workflow", label: "Development Workflow", description: "Create, route, inspect, and close structured development workflows for the current foreground session. The foreground agent remains the Orchestrator; dispatch role jobs through workflow-scoped subagents.", promptSnippet: "Manage session-scoped staged software-development workflows", promptGuidelines: [
+    "When starting a workflow, provide tickets containing only the explicit ticket or work-item titles to show in the task widget; never use planning or execution steps as tickets.",
+    "The development workflow owns the task widget while active. It displays each ticket with the current workflow stage in parentheses.",
+  ], parameters: Params,
     async execute(_id, p, _signal, _update, ctx) {
       uiCtx = ctx;
       // Guard execution as well as the active-tool list: queued/stale calls or another
@@ -780,7 +797,9 @@ export default function (pi: ExtensionAPI) {
         const sor = await resolveSystemOfRecord(preflight.worktree, ctx.isProjectTrusted(), p.approveDetectedIntegration ?? false);
         if (p.mode === "recovery") throw new Error("start does not accept recovery mode");
         if (p.mode === "adopt_existing" && !p.inventory?.length) throw new Error("adopt_existing inventory is required");
-        const state = createState({ id, goal: p.goal, acceptanceCriteria: p.acceptanceCriteria, repositoryRoot: preflight.worktree, systemOfRecord: sor, mode: p.mode as "new" | "adopt_existing" | undefined });
+        const tickets = p.tickets?.map(item => item.trim()).filter(Boolean) ?? [p.goal.trim()];
+        if (!tickets.length) throw new Error("start requires at least one non-empty ticket");
+        const state = createState({ id, goal: p.goal, tickets, acceptanceCriteria: p.acceptanceCriteria, repositoryRoot: preflight.worktree, systemOfRecord: sor, mode: p.mode as "new" | "adopt_existing" | undefined });
         if (p.mode === "adopt_existing") {
           // State parsing validates every per-artifact foreground acceptance before persistence.
           adoptExistingState(state, p.inventory as any);
@@ -808,7 +827,7 @@ export default function (pi: ExtensionAPI) {
         // Expiration is persisted as provided. Invalid values are never treated as expired.
         if (p.expiresAt !== undefined) state.expiresAt = p.expiresAt;
         await persist(state);
-        publishTaskListUpdate(state);
+        await refreshWorkflowTaskWidget(ctx);
         diagnose(id, "workflow_start", { stage: state.stage, model: WORKFLOW_MODEL, planPath: approvedPlan.path, planDigest: approvedPlan.digest, metadata: { planBytes: approvedPlan.bytes, maxReviewCycles: state.review.maxReviewCycles } });
         refreshStaleWorkflowWarnings(await activeSessionStates(), ctx);
         return { content: [{ type: "text", text: `Started ${id} in red_testing with approved plan ${approvedPlan.path} (${approvedPlan.digest}). Dispatch test-writer first with lifecycle=workflow, workflowId=${id}, agentId=test-writer.` }], details: state };
@@ -977,7 +996,7 @@ export default function (pi: ExtensionAPI) {
       trackWorkflowId(s.id);
       stateCache.set(s);
       await updateRecordAfterCommit(s);
-      publishTaskListUpdate(s);
+      await refreshWorkflowTaskWidget(ctx);
       return { content: [{ type: "text", text: statusText(s) }], details: s };
     },
     renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold("workflow ")) + theme.fg("accent", `${args.action} ${args.workflowId ?? ""}`), 0, 0); },
